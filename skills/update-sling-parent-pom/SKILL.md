@@ -30,14 +30,23 @@ Use when the user asks to upgrade the Sling parent POM version in their project.
     - do not continue to `clean verify` until `mvn validate` succeeds
 - run a full `mvn clean verify` build with the current Java version
     - the goal is for the upgraded project to build successfully with the current Java version
-    - if the build fails because Spotless formatting checks were introduced or changed by the new parent POM, run `mvn spotless:apply`, review the resulting formatting changes, and rerun `mvn clean verify`
+    - if the build fails because Spotless formatting checks were introduced or changed by the new parent POM, do not apply the formatting yet: rerun with `-Dspotless.check.skip=true`, and keep passing it to the following builds until the formatting commit, so the formatting changes stay out of the parent update commit (see [Committing the changes](#committing-the-changes))
 - if the project's CI runs a Java version matrix (check the Jenkinsfile or CI config; commonly includes versions newer than the one just used to verify), also verify with the **highest** JDK version in that matrix using the appropriate `mvnNN` wrapper (e.g. `mvn21 clean verify` for JDK 21 — see [skills/README.md](../README.md) § Invoking Apache Maven with different Java versions) before considering the upgrade complete — some failures (e.g. [felix-http-jetty-jdk21.md](./references/felix-http-jetty-jdk21.md)) only reproduce on newer JDKs and will not show up when verifying with the minimum required version alone
 - apply additional verification steps as needed if the specific version requires it
 - if workarounds were present before updating the parent POM version, check if they can be removed. If they are needed add them back
+- commit the changes as described in [Committing the changes](#committing-the-changes)
 
-Do not touch the git repository state - no staging/unstaging, no commits, no pushes.
+### Committing the changes
 
-If the user separately commits and pushes the changes (e.g. to an open PR) and a CI build fails, fetch the raw log (e.g. a Jenkins job's `consoleText` endpoint) rather than a JS-rendered log viewer — rendered pipeline-explorer pages often don't expose the actual error text to a fetch tool. A "tests passed" summary alongside an overall build failure means the real failure is in a later stage (verify/IT/checks) — check the full log rather than stopping at the test summary.
+Following the [Update to Parent 60](https://cwiki.apache.org/confluence/spaces/SLING/pages/284790344/Update+to+Parent+60) guidance, record the upgrade as three separate commits, in this order:
+
+1. **Parent update**: the parent POM version change together with every fix needed to make the build pass (plugin/dependency versions, workaround changes, code fixes), but no Spotless formatting changes.
+2. **Formatting**: run `mvn spotless:apply`, review the resulting changes, and commit them **on their own**. Then run `mvn clean verify` again, this time without skipping the Spotless check, and confirm it passes. Skip this commit if `mvn spotless:apply` changes nothing.
+3. **Blame ignore**: add the full SHA of the formatting commit to `.git-blame-ignore-revs` and commit that file, as described in [git-blame-ignore-revs.md](./references/git-blame-ignore-revs.md). Skip this commit if there was no formatting commit.
+
+Use the Jira issue key for the upgrade (e.g. `SLING-NNNNN`) as the commit message prefix if the user provided one. Do not push; leave pushing and opening a pull request to the user.
+
+If the user pushes the commits (e.g. to an open PR) and a CI build fails, fetch the raw log (e.g. a Jenkins job's `consoleText` endpoint) rather than a JS-rendered log viewer — rendered pipeline-explorer pages often don't expose the actual error text to a fetch tool. A "tests passed" summary alongside an overall build failure means the real failure is in a later stage (verify/IT/checks) — check the full log rather than stopping at the test summary.
 
 ### Unsupported versions
 
