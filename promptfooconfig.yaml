@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+
+# Learn more about building a configuration: https://promptfoo.dev/docs/configuration/guide
+
+description: "My eval"
+
+prompts:
+  - "Write a tweet about {{topic}}"
+  - "Write a concise, funny tweet about {{topic}}"
+  
+
+providers:
+  - id: litellm:qwen3-8b # Sends LITELLM_API_KEY as the bearer token
+    config:
+      apiBaseUrl: https://llm.apache.org/v1
+  
+
+tests:
+  - vars:
+      topic: bananas
+
+  - vars:
+      topic: avocado toast
+    assert:
+      # For more information on assertions, see https://promptfoo.dev/docs/configuration/expected-outputs
+
+      # Make sure output contains the word "avocado"
+      - type: icontains
+        value: avocado
+
+      # Prefer shorter outputs
+      - type: javascript
+        value: 1 / (output.length + 1)
+
+  - vars:
+      topic: new york city
+    assert:
+      # For more information on model-graded evals, see https://promptfoo.dev/docs/configuration/expected-outputs/model-graded
+      - type: llm-rubric
+        value: ensure that the output is funny
+        provider:
+          id: litellm:gemma4-26b
+          config:
+            apiBaseUrl: https://llm.apache.org/v1
+
+
