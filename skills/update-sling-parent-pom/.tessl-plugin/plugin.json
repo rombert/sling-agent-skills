@@ -1,0 +1,9 @@
+{
+  "name": "local/update-sling-parent-pom",
+  "description": "Use when the user asks to upgrade the Sling parent POM version in their project",
+  "private": true,
+  "skills": [
+    "."
+  ],
+  "version": "0.1.0"
+}

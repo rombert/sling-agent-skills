@@ -1,0 +1,13 @@
+{
+  "name": "apache-sling-skills/sling-agent-skills",
+  "mode": "vendored",
+  "dependencies": {},
+  "agents": [
+    "claude-code",
+    "cursor",
+    "gemini",
+    "codex",
+    "copilot",
+    "copilot-vscode"
+  ]
+}
