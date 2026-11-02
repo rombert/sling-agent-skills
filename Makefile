@@ -1,5 +1,5 @@
 run-evals: .env
-	sops exec-env .env 'npx promptfoo@0.125.1 eval' 
+	sops exec-env .env 'npx promptfoo@0.125.1 eval --no-cache'
 .PHONY=run-evals
 
 view-evals:
