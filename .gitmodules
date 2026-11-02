@@ -1,0 +1,3 @@
+[submodule "repos/sling-org-apache-sling-discovery-impl"]
+	path = repos/sling-org-apache-sling-discovery-impl
+	url = https://github.com/apache/sling-org-apache-sling-discovery-impl.git
