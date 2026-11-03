@@ -16,6 +16,7 @@ Use when the user asks to upgrade the Sling parent POM version in their project.
     - if the baseline build fails only because the current parent POM or project setup requires an older Java version, document that and continue
     - assume the unchanged project would pass with its required Java version; do not switch to version-specific Maven wrappers just to prove the baseline unless the user explicitly asks
     - if the baseline fails for a reason unrelated to the Java version, abort execution and inform the user of the root cause before changing the parent POM
+- record the original effective Java target before changing the parent, following [sling-java-version.md](./references/sling-java-version.md), and preserve it during the upgrade
 - check if any known workarounds exist, but do not remove them yet
 - if other repos in the same workspace/org use the same parent artifact and test patterns (e.g. pax-exam quickstart ITs), check whether one has already been migrated to the target parent version — its pinned test/IT dependency versions are a validated reference point and can save significant troubleshooting
 - identify the current version of the Sling parent POM in the user's project
