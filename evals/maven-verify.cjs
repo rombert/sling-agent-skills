@@ -1,5 +1,5 @@
 const path = require('node:path');
-const { run, tail } = require('./tools.cjs');
+const { run, tail } = require('./process.cjs');
 const { checkUpgrade } = require('./parent-upgrade.cjs');
 
 module.exports = async (_output, context) => {

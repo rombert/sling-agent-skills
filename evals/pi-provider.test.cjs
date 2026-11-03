@@ -110,7 +110,7 @@ else {
   } };
 }
 
-test('Pi adapter shares generation config, grades actual edits, and isolates resources', async (t) => {
+test('Pi adapter applies generation config, grades actual edits, and isolates resources', async (t) => {
   const { source, config } = await fixture(t);
   // An inherited PI directory must never override the private evaluation config.
   setEnv(t, 'PI_CODING_AGENT_DIR', '/does/not/exist');
@@ -289,7 +289,7 @@ test('Pi JSONL parser preserves Unicode line separators and split UTF-8 data', a
 });
 
 // Opt-in: uses the installed Pi CLI and a loopback SSE endpoint, never a paid model.
-test('installed Pi uses native tools and the exact shared request settings', {
+test('installed Pi uses native tools and the configured request settings', {
   skip: !process.env.PI_EVAL_INTEGRATION, timeout: 120000,
 }, async (t) => {
   const { source, config } = await fixture(t);

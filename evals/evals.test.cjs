@@ -4,11 +4,11 @@ const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { test } = require('node:test');
-const Provider = require('./provider.cjs');
+const { prepare, result } = require('./workspace.cjs');
 const grade = require('./maven-verify.cjs');
 const parentGrade = require('./parent-upgrade.cjs');
 const skillGrade = require('./skill-usage.cjs');
-const { executeTool, htmlToText, readText, run, safePath } = require('./tools.cjs');
+const { run, tail } = require('./process.cjs');
 const { toolKey } = require('./tool-key.cjs');
 
 const exec = promisify(execFile);
@@ -47,169 +47,101 @@ async function fixture(t) {
     working_dir: source,
     skills_dir: './skills',
     install_skills: true,
-    model: 'qwen3-8b',
-    apiBaseUrl: 'https://llm.example.invalid/v1',
-    maxTurns: 8,
     mavenTimeoutMs: 2000,
   };
   return { root, source, config };
 }
 
-function calls(...items) {
-  return {
-    choices: [{ finish_reason: 'tool_calls', message: { role: 'assistant', content: null,
-      tool_calls: items.map(([name, args], index) => ({
-        id: `tool-${index}`, type: 'function', function: { name, arguments: JSON.stringify(args) },
-      })),
-    } }],
-    usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
-  };
-}
-
-const finish = (summary = 'Upgraded the parent.', status = 'completed') =>
-  calls(['finish_task', { status, summary }]);
-
-function mockModel(t, responses, requests = []) {
-  setEnv(t, 'LITELLM_API_KEY', 'test-only-not-a-real-key');
-  t.mock.method(globalThis, 'fetch', async (url, init) => {
-    assert.equal(url, 'https://llm.example.invalid/v1/chat/completions');
-    assert.equal(init.headers.Authorization, 'Bearer test-only-not-a-real-key');
-    requests.push(JSON.parse(init.body));
-    assert.ok(responses.length, 'Unexpected additional model call');
-    return new Response(JSON.stringify(responses.shift()), { status: 200 });
-  });
-}
-
-test('with-skills run loads instructions, edits files, and returns the actual diff', async (t) => {
-  const { source, config } = await fixture(t);
-  const requests = [];
-  mockModel(t, [
-    calls(['read_skill', { name: 'update-sling-parent-pom' }], ['read_file', { path: 'pom.xml' }]),
-    calls(['replace_text', { path: 'pom.xml', old_text: '<version>52</version>', new_text: '<version>99</version>' }]),
-    calls(['write_file', { path: 'src/new.txt', content: 'new file\n' }]),
-    finish(),
-  ], requests);
-  const result = await new Provider({ config }).callApi('Upgrade this project to the latest Sling parent pom');
-  assert.equal(result.error, undefined);
-  assert.equal(result.cached, false);
-  assert.equal(result.tokenUsage.total, 48);
-  assert.equal(requests[0].temperature, 0);
-  assert.equal(requests[0].max_tokens, 8192);
-  assert.equal(JSON.parse(result.output).status, 'completed');
-  assert.match(result.metadata.workspaceDiff, /\+.*<version>99/);
-  assert.match(result.metadata.workspaceDiff, /src\/new.txt/);
-  assert.deepEqual(result.metadata.skillCalls, [{ name: 'update-sling-parent-pom', is_error: false }]);
-  assert.equal(skillGrade('', { providerResponse: result }).pass, true);
-  assert.equal((await parentGrade('', { providerResponse: result })).pass, true);
-  assert.match(requests[0].messages[0].content, /osgi-scr-migrator/);
-  assert.match(requests[0].messages[0].content, /sling-release/);
-  assert.match(requests[1].messages.find((m) => m.role === 'tool').content, /Updating the Sling Parent POM/);
-  assert.match(await fs.readFile(path.join(source, 'pom.xml'), 'utf8'), /<version>52/);
-  assert.match(await fs.readFile(path.join(result.metadata.workingDir, 'pom.xml'), 'utf8'), /<version>99/);
-  assert.equal((await exec('git', ['remote'], { cwd: result.metadata.workingDir })).stdout, '');
-  assert.equal((await exec('git', ['status', '--porcelain'], { cwd: source })).stdout, '');
-});
-
-test('CJS forwards shared generation settings rather than hard-coding sampling', async (t) => {
-  const { config } = await fixture(t);
-  const requests = [];
-  mockModel(t, [finish('Blocked.', 'blocked')], requests);
-  const result = await new Provider({ config: { ...config, model: 'shared-model', temperature: 0.25, maxTokens: 1024,
-    chatTemplateKwargs: { enable_thinking: false } } }).callApi('Upgrade');
-  assert.equal(requests[0].model, 'shared-model');
-  assert.equal(requests[0].temperature, 0.25);
-  assert.equal(requests[0].max_tokens, 1024);
-  assert.deepEqual(requests[0].chat_template_kwargs, { enable_thinking: false });
-  assert.deepEqual(result.metadata.chatTemplateKwargs, { enable_thinking: false });
-});
-
-test('CJS enables server thinking without sending Pi context settings', async (t) => {
-  const { config } = await fixture(t);
-  const requests = [];
-  mockModel(t, [finish('Blocked.', 'blocked')], requests);
-  const result = await new Provider({ config: { ...config, model: 'qwen3.8-27b',
-    temperature: 0, maxTokens: 8192, contextWindow: 131072,
-    piCompaction: { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 },
-    chatTemplateKwargs: { enable_thinking: true } } }).callApi('Upgrade');
-  assert.equal(result.error, undefined);
-  assert.equal(requests[0].model, 'qwen3.8-27b');
-  assert.equal(requests[0].temperature, 0);
-  assert.equal(requests[0].max_tokens, 8192);
-  assert.deepEqual(requests[0].chat_template_kwargs, { enable_thinking: true });
-  assert.equal(requests[0].contextWindow, undefined);
-  assert.equal(requests[0].piCompaction, undefined);
-  assert.deepEqual(result.metadata.chatTemplateKwargs, { enable_thinking: true });
-});
-
-test('without-skills run has identical tools but cannot load a skill', async (t) => {
-  const { config } = await fixture(t);
-  const requests = [];
-  mockModel(t, [
-    calls(['read_skill', { name: 'update-sling-parent-pom' }]),
-    finish('No skill available.', 'blocked'),
-  ], requests);
-  const result = await new Provider({ config: { ...config, install_skills: false } }).callApi('Upgrade');
-  assert.equal(result.error, undefined);
-  assert.match(requests[0].messages[0].content, /Installed skill catalog.*\[\]/);
-  assert.match(requests[1].messages.at(-1).content, /Skill is not installed/);
-  assert.deepEqual(result.metadata.skillCalls, [{ name: 'update-sling-parent-pom', is_error: true }]);
-  assert.equal(skillGrade('', { providerResponse: result }).pass, true);
-  assert.ok(requests[0].tools.some((tool) => tool.function.name === 'replace_text'));
-});
-
 test('each call gets a fresh clone and ignored build outputs are not copied', async (t) => {
   const { source, config } = await fixture(t);
   await fs.mkdir(path.join(source, 'target'));
   await fs.writeFile(path.join(source, 'target', 'stale.txt'), 'stale');
-  const first = await Provider.prepare(config);
+  const first = await prepare(config);
   await fs.writeFile(path.join(first.workingDir, 'pom.xml'), 'changed');
-  const second = await Provider.prepare(config);
+  const second = await prepare(config);
   assert.notEqual(first.workingDir, second.workingDir);
   assert.equal(first.baselineCommit, second.baselineCommit);
   assert.match(await fs.readFile(path.join(second.workingDir, 'pom.xml'), 'utf8'), /<version>52/);
   await assert.rejects(fs.stat(path.join(second.workingDir, 'target')), { code: 'ENOENT' });
+  assert.equal((await exec('git', ['remote'], { cwd: second.workingDir })).stdout, '');
+  assert.equal((await exec('git', ['status', '--porcelain'], { cwd: source })).stdout, '');
 });
 
-test('dirty source and missing model key fail instead of modifying the source', async (t) => {
+test('workspace copies all skills privately and the no-skills arm needs no skill directory', async (t) => {
+  const { config } = await fixture(t);
+  const state = await prepare(config);
+  assert.deepEqual(state.skills.map((skill) => skill.name).sort(),
+    ['osgi-scr-migrator', 'sling-release', 'update-sling-parent-pom']);
+  for (const skill of state.skills) {
+    assert.deepEqual(Object.keys(skill).sort(), ['directory', 'name']);
+    assert.equal(skill.directory, path.join(state.runDir, 'skills', skill.name));
+    assert.equal(await fs.readFile(path.join(skill.directory, 'SKILL.md'), 'utf8'),
+      await fs.readFile(path.join(config.skills_dir, skill.name, 'SKILL.md'), 'utf8'));
+  }
+  const baseline = await prepare({ ...config, install_skills: false, skills_dir: '/does/not/exist' });
+  assert.deepEqual(baseline.skills, []);
+  await assert.rejects(fs.stat(path.join(baseline.runDir, 'skills')), { code: 'ENOENT' });
+});
+
+test('workspace rejects skill directories missing SKILL.md', async (t) => {
+  const { root, config } = await fixture(t);
+  const skills_dir = path.join(root, 'invalid-skills');
+  await fs.mkdir(path.join(skills_dir, 'missing-instructions'), { recursive: true });
+  await assert.rejects(prepare({ ...config, skills_dir }), { code: 'ENOENT' });
+});
+
+test('workspace result retains actual edits, new files, skill reads and bounded shell evidence', async (t) => {
+  const { source, config } = await fixture(t);
+  const state = await prepare(config);
+  state.completion = { status: 'completed', summary: 'Upgraded the parent.' };
+  await fs.writeFile(path.join(state.workingDir, 'pom.xml'), pom('99'));
+  await fs.mkdir(path.join(state.workingDir, 'src'));
+  await fs.writeFile(path.join(state.workingDir, 'src', 'new.txt'), 'new file\n');
+  const command = 'curl https://example.invalid/metadata';
+  const toolCalls = [
+    { name: 'read', input: { path: 'pom.xml' }, output: 'not reference material' },
+    { name: 'bash', input: { command }, output: 'old result' },
+    { name: 'bash', input: { command }, output: 'Release 99 ' + 'x'.repeat(5000) },
+    { name: 'bash', input: { command: 'wget https://example.invalid/missing' }, is_error: true, output: '404' },
+  ];
+  const skillCalls = [{ name: 'update-sling-parent-pom', is_error: false }, { name: 'other', is_error: true }];
+  const response = await result(state, { toolCalls, skillCalls, turns: 4, tokenUsage: { total: 48 }, harness: 'pi' });
+  const output = JSON.parse(response.output);
+  assert.equal(response.cached, false);
+  assert.equal(response.tokenUsage.total, 48);
+  assert.equal(output.status, 'completed');
+  assert.equal(output.finalParent.version, '99');
+  assert.deepEqual(output.loadedSkills, ['update-sling-parent-pom']);
+  assert.match(output.diff, /\+.*<version>99/);
+  assert.match(output.diff, /src\/new.txt/);
+  assert.equal(output.sources.length, 2);
+  assert.equal(output.sources[0].command, command);
+  assert.match(output.sources[0].output, /Release 99/);
+  assert.match(output.sources[0].output, /truncated/);
+  assert.ok(output.sources[0].output.length < 4500);
+  assert.equal(output.sources[1].is_error, true);
+  assert.equal(await fs.readFile(path.join(state.runDir, 'changes.patch'), 'utf8'), response.metadata.workspaceDiff);
+  assert.equal(await fs.readFile(path.join(state.runDir, 'summary.txt'), 'utf8'), state.completion.summary);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(state.runDir, 'completion.json'))), state.completion);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(state.runDir, 'tool-calls.json'))), toolCalls);
+  assert.match(await fs.readFile(path.join(source, 'pom.xml'), 'utf8'), /<version>52/);
+  await assert.rejects(fs.stat(path.join(source, 'src', 'new.txt')), { code: 'ENOENT' });
+});
+
+test('dirty source is rejected without modifying user work', async (t) => {
   const { source, config } = await fixture(t);
   await fs.writeFile(path.join(source, 'local.txt'), 'user work');
-  await assert.rejects(Provider.prepare(config), /must be clean/);
-  setEnv(t, 'LITELLM_API_KEY', undefined);
-  assert.match((await new Provider({ config }).callApi('Upgrade')).error, /LITELLM_API_KEY/);
+  await assert.rejects(prepare(config), /must be clean/);
   assert.equal(await fs.readFile(path.join(source, 'local.txt'), 'utf8'), 'user work');
-});
-
-test('tool loop fails on budget exhaustion and API errors', async (t) => {
-  const { config } = await fixture(t);
-  mockModel(t, [calls(['read_file', { path: 'pom.xml' }])]);
-  const result = await new Provider({ config: { ...config, maxTurns: 1 } }).callApi('Upgrade');
-  assert.equal(result.error, undefined);
-  assert.equal(result.metadata.completion.status, 'incomplete');
-  assert.match(result.metadata.completion.summary, /did not call finish_task within 1 turns/);
-  t.mock.method(globalThis, 'fetch', async () => new Response('bad credentials', { status: 401 }));
-  assert.match((await new Provider({ config }).callApi('Upgrade')).error, /LiteLLM HTTP 401/);
-});
-
-test('editing tools preserve Latin-1, reject ambiguous edits and confine paths', async (t) => {
-  const { source } = await fixture(t);
-  const file = path.join(source, 'latin.xml');
-  await fs.writeFile(file, '<?xml version="1.0" encoding="ISO-8859-1"?><name>caf\u00e9</name>', 'latin1');
-  const state = { workingDir: source, skills: [] };
-  await executeTool('replace_text', { path: 'latin.xml', old_text: 'caf\u00e9', new_text: 'th\u00e9' }, state);
-  assert.match((await readText(file)).text, /th\u00e9/);
-  assert.ok((await fs.readFile(file)).includes(0xe9));
-  await assert.rejects(executeTool('replace_text', { path: 'pom.xml', old_text: 'version', new_text: 'oops' }, state), /exactly once/);
-  await assert.rejects(safePath(source, '../outside'), /outside/);
-  await assert.rejects(safePath(source, '.git/config'), /outside/);
-  await fs.symlink(path.dirname(source), path.join(source, 'outside-link'));
-  await assert.rejects(safePath(source, 'outside-link/file'), /outside/);
-  await fs.symlink(path.join(path.dirname(source), 'nonexistent'), path.join(source, 'dangling'));
-  await assert.rejects(safePath(source, 'dangling'), /Dangling/);
+  await fs.unlink(path.join(source, 'local.txt'));
+  await fs.writeFile(path.join(source, 'pom.xml'), 'uncommitted changes');
+  await assert.rejects(prepare(config), /must be clean/);
+  assert.equal(await fs.readFile(path.join(source, 'pom.xml'), 'utf8'), 'uncommitted changes');
 });
 
 test('Maven grader checks exit status in the edited workspace, not model text', async (t) => {
   const { root, source, config } = await fixture(t);
-  const state = await Provider.prepare(config);
+  const state = await prepare(config);
   state.completion = { status: 'completed', summary: 'Upgraded.' };
   await fs.writeFile(path.join(state.workingDir, 'pom.xml'), pom('99'));
   const bin = path.join(root, 'bin');
@@ -246,88 +178,35 @@ test('long-running commands time out and retain their logs', async (t) => {
   assert.ok(await fs.stat(log));
 });
 
-test('progress narration does not end the editing loop', async (t) => {
-  const { config } = await fixture(t);
-  const requests = [];
-  mockModel(t, [
-    { choices: [{ finish_reason: 'stop', message: { content: "I'll try a different approach." } }] },
-    calls(['read_file', { path: 'pom.xml' }]),
-    calls(['replace_text', { path: 'pom.xml', old_text: '<version>52</version>', new_text: '<version>99</version>' }]),
-    finish(),
-  ], requests);
-  const result = await new Provider({ config }).callApi('Upgrade');
-  assert.equal(result.metadata.completion.status, 'completed');
-  assert.match(requests[1].messages.at(-1).content, /progress narration/);
-  assert.equal((await parentGrade('', { providerResponse: result })).pass, true);
+test('process helpers retain stdout/stderr, bound log tails and strip model/Git environment', async (t) => {
+  const { root } = await fixture(t);
+  const log = path.join(root, 'process.log');
+  setEnv(t, 'LITELLM_API_KEY', 'must-not-reach-child');
+  setEnv(t, 'GIT_DIR', '/does/not/exist');
+  const result = await run(process.execPath, ['-e',
+    'console.log(JSON.stringify({ cwd: process.cwd(), key: process.env.LITELLM_API_KEY, git: process.env.GIT_DIR }));' +
+    'console.log("x".repeat(14000)); process.stderr.write("end");'], { cwd: root, log });
+  assert.equal(result.code, 0);
+  assert.equal(result.timedOut, false);
+  const full = await fs.readFile(log, 'utf8');
+  assert.deepEqual(JSON.parse(full.split('\n')[0]), { cwd: root });
+  assert.ok(full.length > 14000);
+  assert.equal((await tail(log)).length, 12000);
+  assert.equal(await tail(log, 3), 'end');
 });
 
-test('endless narration is bounded and fails without running Maven', async (t) => {
-  const { config } = await fixture(t);
-  mockModel(t, Array.from({ length: 3 }, () => ({ choices: [{ message: { content: 'Let me investigate further.' } }] })));
-  const result = await new Provider({ config }).callApi('Upgrade');
-  assert.equal(result.error, undefined);
-  assert.equal(result.metadata.completion.status, 'incomplete');
-  assert.equal(result.metadata.turns, 3);
-  const verification = await grade('BUILD SUCCESS', { providerResponse: result });
-  assert.equal(verification.pass, false);
-  assert.match(verification.reason, /Maven not run/);
-  await assert.rejects(fs.stat(path.join(result.metadata.runDir, 'maven-verify.log')), { code: 'ENOENT' });
-});
-
-test('confusing a skill with a tool gets an actionable error, not implicit skill loading', async (t) => {
-  const { config } = await fixture(t);
-  const requests = [];
-  mockModel(t, [calls(['update-sling-parent-pom', { version: 'latest' }]),
-    calls(['read_skill', { name: 'update-sling-parent-pom' }]), finish('Blocked.', 'blocked')], requests);
-  const result = await new Provider({ config }).callApi('Upgrade');
-  assert.match(requests[1].messages.at(-1).content, /Call read_skill/);
-  assert.equal(result.metadata.toolCalls[0].is_error, true);
-  assert.deepEqual(result.metadata.skillCalls, [{ name: 'update-sling-parent-pom', is_error: false }]);
-  assert.equal(skillGrade('', { providerResponse: { metadata: { skillsInstalled: true, skillCalls: [] } } }).pass, false);
-});
-
-test('repeated failed URL fetches are cached and a stalled loop stops early', async (t) => {
-  const { config } = await fixture(t);
-  const requests = [];
-  let urlFetches = 0;
-  mockModel(t, Array.from({ length: 4 }, () => calls(['fetch_url', { url: 'https://example.invalid/missing' }])), requests);
-  const modelFetch = globalThis.fetch;
-  t.mock.method(globalThis, 'fetch', async (url, init) => {
-    if (String(url) === 'https://example.invalid/missing') {
-      urlFetches++;
-      return new Response('Not found', { status: 404 });
-    }
-    return modelFetch(url, init);
+test('process helper cancels commands without reporting a timeout', async (t) => {
+  const { root } = await fixture(t);
+  const result = await run(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    cwd: root, log: path.join(root, 'aborted.log'), signal: AbortSignal.timeout(100),
   });
-  const result = await new Provider({ config }).callApi('Upgrade');
-  assert.equal(urlFetches, 1);
-  assert.equal(result.metadata.completion.status, 'incomplete');
-  assert.match(result.metadata.completion.summary, /stalled tool loop/);
-  assert.equal(result.metadata.toolCalls[1].cached, true);
-  assert.equal(JSON.parse(result.output).sources.length, 1);
-});
-
-test('old verbose tool outputs are archived but skill instructions remain available', async (t) => {
-  const { source, config } = await fixture(t);
-  await fs.writeFile(path.join(source, 'large.txt'), `START-${'x'.repeat(12000)}-END`);
-  await exec('git', ['add', 'large.txt'], { cwd: source });
-  await exec('git', ['-c', 'user.name=Eval Test', '-c', 'user.email=eval@example.invalid',
-    '-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '-m', 'large fixture'], { cwd: source });
-  const requests = [];
-  mockModel(t, [calls(['read_skill', { name: 'update-sling-parent-pom' }], ['read_file', { path: 'large.txt' }]),
-    calls(['read_file', { path: 'pom.xml' }]), finish('Blocked.', 'blocked')], requests);
-  const result = await new Provider({ config: { ...config, recentToolTurns: 1, toolOutputChars: 2000 } }).callApi('Upgrade');
-  const history = requests[1].messages.filter((message) => message.role === 'tool');
-  assert.match(history[0].content, /Updating the Sling Parent POM/);
-  assert.equal(JSON.parse(history[1].content).archived, true);
-  assert.ok(history[1].content.length < 1500);
-  assert.equal(result.metadata.toolCalls[1].output.length, 12010);
-  assert.match(await fs.readFile(path.join(result.metadata.runDir, 'model-responses.jsonl'), 'utf8'), /finish_task/);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.signal, 'SIGKILL');
 });
 
 test('parent assertion reads actual XML and rejects unchanged, downgraded, snapshot and unrelated parents', async (t) => {
   const { config } = await fixture(t);
-  const metadata = await Provider.prepare(config);
+  const metadata = await prepare(config);
   metadata.completion = { status: 'completed', summary: 'Trust me!' };
   const context = { providerResponse: { metadata } };
   for (const invalid of [pom(), pom('51'), pom('66-SNAPSHOT'), pom('99', 'unrelated'), pom('99', 'sling', 'other.group')]) {
@@ -346,18 +225,35 @@ test('parent assertion reads actual XML and rejects unchanged, downgraded, snaps
 
 test('completed-without-edits cannot trigger a successful baseline Maven build', async (t) => {
   const { config } = await fixture(t);
-  mockModel(t, [finish('Done!')]);
-  const result = await new Provider({ config }).callApi('Upgrade');
-  assert.equal(result.metadata.workspaceDiff, '');
-  const verification = await grade('', { providerResponse: result });
+  const metadata = await prepare(config);
+  metadata.completion = { status: 'completed', summary: 'Done!' };
+  const verification = await grade('', { providerResponse: { metadata } });
   assert.equal(verification.pass, false);
   assert.match(verification.reason, /Parent was not upgraded/);
-  await assert.rejects(fs.stat(path.join(result.metadata.runDir, 'maven-verify.log')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(path.join(metadata.runDir, 'maven-verify.log')), { code: 'ENOENT' });
 });
 
-test('HTML extraction removes script/style noise while retaining useful links', () => {
-  const extracted = htmlToText('<html><style>body{color:red}</style><script>window.track()</script><p>Parent &amp; releases</p><a href="/maven-metadata.xml">Metadata</a></html>', 'https://example.invalid/');
-  assert.doesNotMatch(extracted, /track|color:red|<html>/);
-  assert.match(extracted, /Parent & releases/);
-  assert.match(extracted, /\[Metadata\]\(https:\/\/example.invalid\/maven-metadata.xml\)/);
+test('blocked and incomplete tasks cannot trigger Maven verification even after an upgrade', async (t) => {
+  const { config } = await fixture(t);
+  const metadata = await prepare(config);
+  await fs.writeFile(path.join(metadata.workingDir, 'pom.xml'), pom('99'));
+  for (const status of ['blocked', 'incomplete']) {
+    metadata.completion = { status, summary: 'Unable to finish.' };
+    const verification = await grade('BUILD SUCCESS', { providerResponse: { metadata } });
+    assert.equal(verification.pass, false);
+    assert.match(verification.reason, /Maven not run: Task did not complete/);
+    await assert.rejects(fs.stat(path.join(metadata.runDir, 'maven-verify.log')), { code: 'ENOENT' });
+  }
+});
+
+test('skill assertion requires successful relevant skill reads only in the skills arm', () => {
+  const check = (metadata) => skillGrade('', { providerResponse: { metadata } }).pass;
+  assert.equal(check(undefined), false);
+  for (const skillCalls of [[], [{ name: 'update-sling-parent-pom', is_error: true }], [{ name: 'other-skill' }]]) {
+    assert.equal(check({ skillsInstalled: true, skillCalls }), false);
+  }
+  assert.equal(check({ skillsInstalled: true, skillCalls: [{ name: 'update-sling-parent-pom' }] }), true);
+  assert.equal(check({ skillsInstalled: false, skillCalls: [] }), true);
+  assert.equal(check({ skillsInstalled: false, skillCalls: [{ name: 'any-skill', is_error: true }] }), true);
+  assert.equal(check({ skillsInstalled: false, skillCalls: [{ name: 'any-skill' }] }), false);
 });

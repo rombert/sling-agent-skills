@@ -1,19 +1,13 @@
-BACKEND ?= all
 ARM ?= both
 RUNS ?= 1
 
-BACKEND_FILTER_pi := ^pi-
-BACKEND_FILTER_native := ^cjs-
 ARM_FILTER_with-skills := with-skills$$
 ARM_FILTER_without-skills := without-skills$$
-PROVIDER_FILTER = $(BACKEND_FILTER_$(BACKEND))$(ARM_FILTER_$(ARM))
+PROVIDER_FILTER = $(ARM_FILTER_$(ARM))
 
 run-evals: .env
-ifeq ($(BACKEND),pi)
-else ifeq ($(BACKEND),native)
-else ifeq ($(BACKEND),all)
-else
-	$(error BACKEND must be pi, native, or all)
+ifneq ($(origin BACKEND),undefined)
+	$(error BACKEND has been removed; evaluations use Pi only. Omit BACKEND)
 endif
 ifeq ($(ARM),with-skills)
 else ifeq ($(ARM),without-skills)

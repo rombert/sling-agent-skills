@@ -3,7 +3,6 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
-const { readText } = require('./tools.cjs');
 const { readParent } = require('./parent-upgrade.cjs');
 
 const exec = promisify(execFile);
@@ -40,16 +39,12 @@ async function prepare(config) {
     for (const entry of await fs.readdir(installed, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const directory = path.join(installed, entry.name);
-      const { text } = await readText(path.join(directory, 'SKILL.md'));
-      skills.push({
-        name: entry.name,
-        description: text.match(/^description:\s*(.+)$/m)?.[1] ?? entry.name,
-        directory,
-      });
+      await fs.access(path.join(directory, 'SKILL.md'));
+      skills.push({ name: entry.name, directory });
     }
   }
   const initialParent = await readParent(path.join(workingDir, 'pom.xml'));
-  return { runDir, workingDir, baselineCommit, initialParent, skills, config, mavenCalls: 0 };
+  return { runDir, workingDir, baselineCommit, initialParent, skills, config };
 }
 
 async function diff(workingDir, baselineCommit) {
@@ -74,17 +69,16 @@ function shorten(text, limit) {
 function graderSources(toolCalls) {
   const sources = new Map();
   for (const call of toolCalls) {
-    if (call.name === 'fetch_url') sources.set(call.input?.url, { url: call.input?.url, call });
     // Shell commands are evidence, not a claim that every URL in them was fetched.
     if (call.name === 'bash' && /https?:\/\/|\b(?:curl|wget)\b/.test(call.input?.command ?? '')) {
-      sources.set(call.input.command, { command: call.input.command, call });
+      sources.set(call.input.command, call);
     }
   }
   let remaining = 16000;
-  return [...sources.values()].slice(0, 12).map(({ call, ...source }) => {
+  return [...sources.values()].slice(0, 12).map((call) => {
     const output = shorten(JSON.stringify(call.output) ?? 'null', Math.max(100, Math.min(4000, remaining)));
     remaining = Math.max(0, remaining - output.length);
-    return { ...source, is_error: Boolean(call.is_error), output };
+    return { command: call.input.command, is_error: Boolean(call.is_error), output };
   });
 }
 
@@ -114,4 +108,4 @@ async function result(state, { toolCalls, skillCalls, tokenUsage, turns, ...meta
   };
 }
 
-module.exports = { prepare, shorten, result };
+module.exports = { prepare, result };

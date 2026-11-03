@@ -2,7 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
-const { run, tail } = require('./tools.cjs');
+const { run, tail } = require('./process.cjs');
 const { checkUpgrade } = require('./parent-upgrade.cjs');
 
 const exec = promisify(execFile);
