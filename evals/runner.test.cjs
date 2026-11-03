@@ -10,6 +10,7 @@ const cwd = path.resolve(__dirname, '..');
 const env = { ...process.env, MAKEFLAGS: '' };
 delete env.BACKEND;
 delete env.ARM;
+delete env.RUNS;
 
 test('shared evaluation config enables thinking and uses the verified large-model context', async () => {
   const yaml = await fs.readFile(path.join(cwd, 'promptfooconfig.yaml'), 'utf8');
@@ -34,6 +35,7 @@ test('eval launcher selects Pi, native CJS, or all providers without running eva
     const command = stdout.split('\n').find((line) => line.startsWith('sops exec-env'));
     assert.ok(command, `missing invocation for ${backend ?? 'default'}`);
     assert.match(command, /promptfoo@0\.125\.1 eval --no-cache/);
+    assert.match(command, /--repeat "1"/);
     if (filter) assert.ok(command.endsWith(`--filter-providers "${filter}"'`));
     else assert.doesNotMatch(command, /--filter-providers/);
   }
@@ -72,6 +74,31 @@ test('eval launcher rejects invalid or empty backend values', async () => {
   for (const backend of ['invalid', '', 'pi native']) {
     await assert.rejects(exec('make', ['--dry-run', 'run-evals', `BACKEND=${backend}`], { cwd, env }), (error) => {
       assert.match(error.stderr, /BACKEND must be pi, native, or all/);
+      assert.doesNotMatch(error.stdout, /sops exec-env/);
+      return true;
+    });
+  }
+});
+
+test('eval launcher repeats each selected arm the configured number of times', async () => {
+  for (const runs of ['1', '3', '12']) {
+    for (const backend of ['all', 'pi', 'native']) {
+      for (const arm of ['both', 'with-skills', 'without-skills']) {
+        const { stdout } = await exec('make', ['--dry-run', 'run-evals',
+          `BACKEND=${backend}`, `ARM=${arm}`, `RUNS=${runs}`], { cwd, env });
+        const command = stdout.split('\n').find((line) => line.startsWith('sops exec-env'));
+        assert.ok(command, `missing invocation for ${backend}/${arm}/${runs}`);
+        assert.equal(command.match(/--repeat "[^"]*"/g)?.length, 1);
+        assert.ok(command.includes(`--repeat "${runs}"`));
+      }
+    }
+  }
+});
+
+test('eval launcher rejects invalid or empty run counts', async () => {
+  for (const runs of ['0', '-1', '1.5', 'invalid', '', '1 2', '2 ', '+1', '01', '1e2']) {
+    await assert.rejects(exec('make', ['--dry-run', 'run-evals', `RUNS=${runs}`], { cwd, env }), (error) => {
+      assert.match(error.stderr, /RUNS must be a positive integer/);
       assert.doesNotMatch(error.stdout, /sops exec-env/);
       return true;
     });
