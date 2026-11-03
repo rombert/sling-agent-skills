@@ -23,6 +23,7 @@ Use when the user asks to upgrade the Sling parent POM version in their project.
     - target the latest available version, not merely the next increment
 - check `https://cwiki.apache.org/confluence/spaces/SLING/pages/284790344/Update+to+Parent+60`for additional instructions. Follow any steps it documents that are not already covered by this skill's reference files
 - update the parent POM version
+- check `project.build.outputTimestamp` before building: preserve a valid existing value; otherwise use `1980-01-01T00:00:02Z` as described in [timestamp.md](./references/timestamp.md)
 - run `mvn validate` with the current Java version before running a full build
     - if `mvn validate` fails, fix any POM syntax issues first
     - if the new parent POM no longer manages some plugin versions, add explicit plugin versions for the affected plugins
