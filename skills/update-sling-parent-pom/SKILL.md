@@ -25,6 +25,7 @@ Use when the user asks to upgrade the Sling parent POM version in their project.
 - update the parent POM version
 - if the POM declares aggregate OSGi dependencies (`org.osgi:osgi.core` or `org.osgi:osgi.cmpn`), migrate them before validation as described in [osgi-deps.md](./references/osgi-deps.md)
 - check `project.build.outputTimestamp` before building: preserve a valid existing value; otherwise use `1980-01-01T00:00:02Z` as described in [timestamp.md](./references/timestamp.md)
+- check for missing explicit dependency scopes before validation: preserve existing explicit scopes and assign missing ones based on main/test usage as described in [deps-scope.md](./references/deps-scope.md)
 - run `mvn validate` with the current Java version before running a full build
     - if `mvn validate` fails, fix any POM syntax issues first
     - if the new parent POM no longer manages some plugin versions, add explicit plugin versions for the affected plugins
