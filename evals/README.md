@@ -33,11 +33,22 @@ make run-evals BACKEND=pi ARM=with-skills        # Pi with skills only
 make run-evals BACKEND=native ARM=both          # Native CJS, both arms
 ```
 
+Set `RUNS` to a positive integer to repeat each test for each selected provider/arm
+(`1` by default). For example:
+
+```sh
+make run-evals BACKEND=pi RUNS=3                 # Three runs per skills arm (six per test)
+make run-evals BACKEND=pi ARM=with-skills RUNS=3 # Three runs per test, with skills only
+```
+
+This passes `--repeat` to Promptfoo, keeping the individual results in one
+evaluation record. Runs remain serial; no retries are added for failures.
+
 `native` means the original CJS tool loop, not Pi's native tools. The default
 configuration runs `cjs-with-skills`, `cjs-without-skills`, `pi-with-skills`, and
 `pi-without-skills`. Selecting `all` includes them in one evaluation run; builds
-remain serial to avoid contention in the shared Maven repository. Invalid backend
-or arm values fail before invoking Promptfoo.
+remain serial to avoid contention in the shared Maven repository. Invalid backend,
+arm, or run-count values fail before invoking Promptfoo.
 
 The equivalent direct Promptfoo commands for a single backend are:
 
