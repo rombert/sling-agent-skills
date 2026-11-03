@@ -24,6 +24,7 @@ Use when the user asks to upgrade the Sling parent POM version in their project.
 - if other repos in the same workspace/org use the same parent artifact and test patterns (e.g. pax-exam quickstart ITs), check whether one has already been migrated to the target parent version — its pinned test/IT dependency versions are a validated reference point and can save significant troubleshooting
 - if the target parent version is 60 or newer, check `https://cwiki.apache.org/confluence/spaces/SLING/pages/284790344/Update+to+Parent+60` for additional instructions. Follow any steps it documents that are not already covered by this skill's reference files
 - update the parent POM version
+- check `project.build.outputTimestamp` before building: preserve a valid existing value; otherwise use `1980-01-01T00:00:02Z` as described in [timestamp.md](./references/timestamp.md)
 - run `mvn validate` with the current Java version before running a full build
     - if `mvn validate` fails, fix any POM syntax issues first
     - if the new parent POM no longer manages some plugin versions, add explicit plugin versions for the affected plugins
