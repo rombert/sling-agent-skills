@@ -1,6 +1,11 @@
 ARM ?= both
 RUNS ?= 1
 
+# Export separately from the shell command so paths are not interpreted as shell syntax.
+ifneq ($(origin REPO),undefined)
+export PROMPTFOO_REPO := $(REPO)
+endif
+
 ARM_FILTER_with-skills := with-skills$$
 ARM_FILTER_without-skills := without-skills$$
 PROVIDER_FILTER = $(ARM_FILTER_$(ARM))

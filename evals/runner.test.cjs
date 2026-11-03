@@ -11,6 +11,8 @@ const env = { ...process.env, MAKEFLAGS: '' };
 delete env.BACKEND;
 delete env.ARM;
 delete env.RUNS;
+delete env.REPO;
+delete env.PROMPTFOO_REPO;
 
 test('shared evaluation config enables thinking and uses the verified large-model context', async () => {
   const yaml = await fs.readFile(path.join(cwd, 'promptfooconfig.yaml'), 'utf8');
@@ -40,6 +42,21 @@ test('eval launcher runs both Pi arms once by default without a provider filter'
   assert.match(command, /promptfoo@0\.125\.1 eval --no-cache/);
   assert.match(command, /--repeat "1"/);
   assert.doesNotMatch(command, /--filter-providers/);
+});
+
+test('eval launcher exports repository overrides literally without invoking Promptfoo', async (t) => {
+  const bin = await fs.mkdtemp('/tmp/opencode/sling-eval-launcher-test-');
+  t.after(() => fs.rm(bin, { recursive: true, force: true }));
+  await fs.writeFile(path.join(bin, 'sops'), `#!${process.execPath}\n` +
+    'console.log(JSON.stringify({ repository: process.env.PROMPTFOO_REPO, args: process.argv.slice(2) }));\n', { mode: 0o755 });
+  for (const repository of [undefined, 'repos/sling-org-apache-sling-discovery-impl', 'repos/a directory; false', '']) {
+    const args = ['--assume-old=.env', 'run-evals'];
+    if (repository !== undefined) args.push(`REPO=${repository}`);
+    const { stdout } = await exec('make', args, { cwd, env: { ...env, PATH: `${bin}${path.delimiter}${env.PATH}` } });
+    const invocation = JSON.parse(stdout.split('\n').find((line) => line.startsWith('{')));
+    assert.equal(invocation.repository, repository);
+    assert.deepEqual(invocation.args, ['exec-env', '.env', 'npx promptfoo@0.125.1 eval --no-cache --repeat "1"']);
+  }
 });
 
 test('eval launcher selects only the requested skills arm', async () => {

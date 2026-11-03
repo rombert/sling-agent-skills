@@ -21,6 +21,21 @@ effective POM XML in JavaScript, respecting XML namespaces and declared encoding
 Malformed XML and DTDs are rejected. The version-specific Maven wrappers documented
 in the main README are available as optional tools.
 
+Select a checkout with `REPO`, using a path relative to the repository root:
+
+```sh
+make run-evals REPO=repos/sling-org-apache-sling-discovery-impl RUNS=3
+```
+
+Without an override, both arms use `providers[0].config.working_dir` in
+`promptfooconfig.yaml` (currently `repos/org-apache-sling-discovery-standalone/`).
+For direct Promptfoo invocations, set `PROMPTFOO_REPO` to override that same setting.
+Absolute paths are also accepted, but every selected path must resolve to a
+**strict subdirectory of this harness's `repos/` directory** and be the root of a
+clean Git repository. The `repos/` directory itself, outside paths, prefix
+lookalikes, symlink escapes, and subdirectories within a Git checkout are rejected
+before Pi is invoked. Paths containing spaces are supported; quote the Make argument.
+
 Select the skills arm with `ARM=with-skills|without-skills|both` (`both` is the
 default):
 
@@ -197,10 +212,19 @@ to use that auditable route; shell reads or partial reads are not credited.
 
 ## Workspaces and grading
 
-Each call clones the current committed state of
-`repos/org-apache-sling-discovery-standalone/`. The source must have no tracked or
+Each call clones the current committed state of the selected repository.
+The source must have no tracked or
 untracked changes; ignored build outputs are not copied. The source checkout is
 never reset, cleaned, staged, or edited. Each clone has its remote removed.
+
+Before the agent runs, the harness captures `repository.name` (the basename of
+the source's `origin` remote, without `.git`, or the checkout directory name when
+there is no origin), `repository.revision` (the full source `HEAD` commit cloned
+for this run), and `repository.directory` (the canonical path under `repos/`).
+These are saved in Promptfoo response metadata and task output, and in
+`repository.json` in the run directory. Provider errors after workspace preparation
+also retain this provenance in response metadata and `error.json`. The existing
+`baselineCommit` metadata remains available and equals `repository.revision`.
 
 Five assertions grade each result:
 

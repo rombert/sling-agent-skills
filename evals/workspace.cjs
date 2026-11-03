@@ -16,8 +16,22 @@ async function git(cwd, args) {
   return stdout;
 }
 
+function isSubdirectory(root, directory) {
+  const relative = path.relative(root, directory);
+  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
 async function prepare(config) {
-  const source = await fs.realpath(path.resolve(projectRoot, config.working_dir));
+  const requested = process.env.PROMPTFOO_REPO ?? config.working_dir;
+  if (typeof requested !== 'string' || !requested.trim()) {
+    throw new Error('working_dir or PROMPTFOO_REPO must name a repository subdirectory of repos');
+  }
+  const repos = path.join(projectRoot, 'repos');
+  const requestedPath = path.resolve(projectRoot, requested);
+  const boundaryError = 'Evaluation repository must be a strict subdirectory of repos (including resolved symlinks)';
+  if (!isSubdirectory(repos, requestedPath)) throw new Error(boundaryError);
+  const [reposRoot, source] = await Promise.all([fs.realpath(repos), fs.realpath(requestedPath)]);
+  if (!isSubdirectory(reposRoot, source)) throw new Error(boundaryError);
   if ((await git(source, ['rev-parse', '--show-toplevel'])).trim() !== source) {
     throw new Error('working_dir must be the root of a Git repository');
   }
@@ -25,9 +39,16 @@ async function prepare(config) {
     throw new Error('The source repository must be clean; commit or move local changes before evaluating');
   }
   const baselineCommit = (await git(source, ['rev-parse', 'HEAD'])).trim();
+  let name = path.basename(source);
+  if ((await git(source, ['remote'])).split('\n').includes('origin')) {
+    const origin = (await git(source, ['remote', 'get-url', 'origin'])).trim();
+    name = origin.replace(/[?#].*$/, '').replace(/\/+$/, '').split(/[/:]/).at(-1).replace(/\.git$/, '') || name;
+  }
+  const repository = { name, revision: baselineCommit, directory: path.join('repos', path.relative(reposRoot, source)) };
   const tempRoot = process.env.PROMPTFOO_WORKSPACE_ROOT || path.join(os.tmpdir(), 'opencode');
   await fs.mkdir(tempRoot, { recursive: true });
   const runDir = await fs.mkdtemp(path.join(tempRoot, 'sling-skill-eval-'));
+  await fs.writeFile(path.join(runDir, 'repository.json'), JSON.stringify(repository, null, 2));
   const workingDir = path.join(runDir, 'project');
   await git(source, ['clone', '--quiet', '--no-local', '--no-hardlinks', source, workingDir]);
   await git(workingDir, ['checkout', '--quiet', '--detach', baselineCommit]);
@@ -44,7 +65,7 @@ async function prepare(config) {
     }
   }
   const initialParent = await readParent(path.join(workingDir, 'pom.xml'));
-  return { runDir, workingDir, baselineCommit, initialParent, skills, config };
+  return { runDir, workingDir, baselineCommit, repository, initialParent, skills, config };
 }
 
 async function diff(workingDir, baselineCommit) {
@@ -88,18 +109,19 @@ async function result(state, { toolCalls, skillCalls, tokenUsage, turns, ...meta
   await fs.writeFile(path.join(state.runDir, 'summary.txt'), state.completion.summary);
   await fs.writeFile(path.join(state.runDir, 'completion.json'), JSON.stringify(state.completion, null, 2));
   await fs.writeFile(path.join(state.runDir, 'tool-calls.json'), JSON.stringify(toolCalls, null, 2));
+  await fs.writeFile(path.join(state.runDir, 'repository.json'), JSON.stringify(state.repository, null, 2));
   let finalParent;
   try { finalParent = await readParent(path.join(state.workingDir, 'pom.xml')); }
   catch (error) { finalParent = { error: error.message }; }
   return {
-    output: JSON.stringify({ ...state.completion, initialParent: state.initialParent, finalParent,
+    output: JSON.stringify({ ...state.completion, repository: state.repository, initialParent: state.initialParent, finalParent,
       loadedSkills: skillCalls.filter((call) => !call.is_error).map((call) => call.name),
       diff: shorten(workspaceDiff, 60000), sources: graderSources(toolCalls) }),
     cached: false,
     tokenUsage,
     metadata: {
       workingDir: state.workingDir, runDir: state.runDir,
-      baselineCommit: state.baselineCommit, workspaceDiff,
+      baselineCommit: state.baselineCommit, repository: state.repository, workspaceDiff,
       initialParent: state.initialParent, completion: state.completion, turns,
       skillsInstalled: Boolean(state.config.install_skills),
       skillCalls, toolCalls, mavenTimeoutMs: state.config.mavenTimeoutMs,

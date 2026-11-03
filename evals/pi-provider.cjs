@@ -245,14 +245,14 @@ module.exports = class PiProvider {
   }
 
   async callApi(prompt, _context, options = {}) {
-    if (!process.env.LITELLM_API_KEY) return { error: 'LITELLM_API_KEY is not set' };
     let state;
     const tokenUsage = { prompt: 0, completion: 0, total: 0, completionDetails: { reasoning: 0 } };
     try {
       options.abortSignal?.throwIfAborted();
+      state = await prepare(this.config);
+      if (!process.env.LITELLM_API_KEY) throw new Error('LITELLM_API_KEY is not set');
       const command = this.config.piCommand ?? 'pi';
       const { stdout: version } = await exec(command, ['--version'], { timeout: 10000, signal: options.abortSignal });
-      state = await prepare(this.config);
       const agentDir = await configure(state);
       const args = [
         '--mode', 'json', '--no-session', '--offline', '--no-extensions', '--no-mcp',
@@ -288,11 +288,12 @@ module.exports = class PiProvider {
       if (state?.runDir) {
         // Preserve the original failure even if persisting additional diagnostics fails.
         await fs.writeFile(path.join(state.runDir, 'error.json'), JSON.stringify({
-          error: message, tokenUsage, diagnostics: state.diagnostics,
+          error: message, repository: state.repository, tokenUsage, diagnostics: state.diagnostics,
         }, null, 2)).catch(() => {});
       }
       return { error: message, cached: false, tokenUsage,
-        metadata: { runDir: state?.runDir, diagnostics: state?.diagnostics } };
+        metadata: { runDir: state?.runDir, repository: state?.repository,
+          baselineCommit: state?.baselineCommit, diagnostics: state?.diagnostics } };
     }
   }
 };

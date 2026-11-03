@@ -29,8 +29,12 @@ function setEnv(t, name, value) {
 }
 
 async function fixture(t) {
-  const root = await fs.mkdtemp('/tmp/opencode/sling-pi-test-');
-  t.after(() => process.env.PI_EVAL_KEEP_ARTIFACTS ? undefined : fs.rm(root, { recursive: true, force: true }));
+  const reposRoot = path.resolve(__dirname, '..', 'repos');
+  await fs.mkdir(reposRoot, { recursive: true });
+  const root = await fs.mkdtemp(path.join(reposRoot, '.sling-pi-test-'));
+  t.after(() => process.env.PI_EVAL_KEEP_ARTIFACTS ? undefined :
+    fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  setEnv(t, 'PROMPTFOO_REPO', undefined);
   setEnv(t, 'PROMPTFOO_WORKSPACE_ROOT', path.join(root, 'runs'));
   setEnv(t, 'LITELLM_API_KEY', 'local-test-key');
   const source = path.join(root, 'source');
@@ -121,6 +125,10 @@ test('Pi adapter applies generation config, grades actual edits, and isolates re
   assert.equal(result.metadata.harness, 'pi');
   assert.equal(result.metadata.piVersion, '1.4.0-test');
   assert.equal(result.metadata.completion.status, 'completed');
+  const revision = (await exec('git', ['rev-parse', 'HEAD'], { cwd: source })).stdout.trim();
+  const repository = { name: 'source', revision, directory: path.relative(path.resolve(__dirname, '..'), source) };
+  assert.deepEqual(result.metadata.repository, repository);
+  assert.deepEqual(JSON.parse(result.output).repository, repository);
   assert.equal((await parentGrade('', { providerResponse: result })).pass, true);
   assert.equal(skillGrade('', { providerResponse: result }).pass, true);
   assert.match(JSON.parse(result.output).sources[0].command, /curl/);
@@ -253,6 +261,12 @@ test('Pi model errors, truncation, malformed events, bad exits and missing settl
     const result = await new Provider({ config }).callApi('Upgrade');
     assert.match(result.error, expected);
     assert.ok(result.metadata.runDir);
+    assert.equal(result.metadata.repository.name, 'source');
+    assert.match(result.metadata.repository.revision, /^[a-f0-9]{40,64}$/);
+    assert.equal(result.metadata.baselineCommit, result.metadata.repository.revision);
+    const error = JSON.parse(await fs.readFile(path.join(result.metadata.runDir, 'error.json')));
+    assert.deepEqual(error.repository, result.metadata.repository);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(result.metadata.runDir, 'repository.json'))), result.metadata.repository);
   }
 });
 
@@ -276,7 +290,21 @@ test('Pi aborts and missing credentials fail without treating them as task compl
   const running = await new Provider({ config }).callApi('Upgrade', {}, { abortSignal: AbortSignal.timeout(300) });
   assert.match(running.error, /abort|timeout/i);
   setEnv(t, 'LITELLM_API_KEY', undefined);
-  assert.match((await new Provider({ config }).callApi('Upgrade')).error, /LITELLM_API_KEY/);
+  const missingKey = await new Provider({ config }).callApi('Upgrade');
+  assert.match(missingKey.error, /LITELLM_API_KEY/);
+  assert.equal(missingKey.metadata.repository.name, 'source');
+});
+
+test('Pi validates repository boundaries before invoking any Pi command and retains provenance if Pi is missing', async (t) => {
+  const { config } = await fixture(t);
+  const piCommand = '/does/not/exist';
+  const invalid = await new Provider({ config: { ...config, working_dir: '/tmp/opencode', piCommand } }).callApi('Upgrade');
+  assert.match(invalid.error, /subdirectory of repos/);
+  assert.equal(invalid.metadata.runDir, undefined);
+  const missingPi = await new Provider({ config: { ...config, piCommand } }).callApi('Upgrade');
+  assert.match(missingPi.error, /ENOENT/);
+  assert.equal(missingPi.metadata.repository.name, 'source');
+  assert.match(missingPi.metadata.repository.revision, /^[a-f0-9]{40,64}$/);
 });
 
 test('Pi JSONL parser preserves Unicode line separators and split UTF-8 data', async (t) => {

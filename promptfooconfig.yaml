@@ -21,7 +21,7 @@ providers:
         enabled: true
         reserveTokens: 16384 # Output budget + Pi's 4096-token safety margin + headroom.
         keepRecentTokens: 20000
-      working_dir: ./repos/org-apache-sling-discovery-standalone/
+      working_dir: ./repos/org-apache-sling-discovery-standalone/ # Override with make run-evals REPO=repos/<checkout>.
       skills_dir: ./skills
       install_skills: true
       maxTurns: 80
@@ -82,4 +82,4 @@ defaultTest:
       value: file://evals/maven-verify.cjs
 
 tests:
-  - description: Upgrade org.apache.sling.discovery.standalone
+  - description: Upgrade the selected Sling module

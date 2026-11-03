@@ -16,7 +16,8 @@ const effective = ({ properties = '<maven.compiler.release>11</maven.compiler.re
 
 function setEnv(t, name, value) {
   const previous = process.env[name];
-  process.env[name] = value;
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
   t.after(() => {
     if (previous === undefined) delete process.env[name];
     else process.env[name] = previous;
@@ -24,8 +25,11 @@ function setEnv(t, name, value) {
 }
 
 async function fixture(t) {
-  const root = await fs.mkdtemp('/tmp/opencode/sling-java-target-test-');
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const reposRoot = path.resolve(__dirname, '..', 'repos');
+  await fs.mkdir(reposRoot, { recursive: true });
+  const root = await fs.mkdtemp(path.join(reposRoot, '.sling-java-target-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  setEnv(t, 'PROMPTFOO_REPO', undefined);
   const source = path.join(root, 'source');
   await fs.mkdir(source);
   await exec('git', ['init', '--quiet', source]);

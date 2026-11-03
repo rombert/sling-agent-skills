@@ -12,6 +12,9 @@ const { run, tail } = require('./process.cjs');
 const { toolKey } = require('./tool-key.cjs');
 
 const exec = promisify(execFile);
+const projectRoot = path.resolve(__dirname, '..');
+const reposRoot = path.join(projectRoot, 'repos');
+const restoredEnvs = new WeakMap();
 
 test('tool repetition keys normalize nested object keys but preserve array order', () => {
   assert.equal(toolKey('read', { path: 'pom.xml', options: { end: 4, start: 1 } }),
@@ -22,18 +25,25 @@ const pom = (version = '52', artifact = 'sling-bundle-parent', group = 'org.apac
   `<project><parent><groupId>${group}</groupId><artifactId>${artifact}</artifactId><version>${version}</version></parent></project>\n`;
 
 function setEnv(t, name, value) {
-  const previous = process.env[name];
-  const assign = (next) => {
-    if (next === undefined) delete process.env[name];
-    else process.env[name] = next;
-  };
-  assign(value);
-  t.after(() => assign(previous));
+  if (!restoredEnvs.has(t)) restoredEnvs.set(t, new Set());
+  const restored = restoredEnvs.get(t);
+  if (!restored.has(name)) {
+    restored.add(name);
+    const previous = process.env[name];
+    t.after(() => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    });
+  }
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }
 
 async function fixture(t) {
-  const root = await fs.mkdtemp('/tmp/opencode/sling-eval-test-');
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(reposRoot, { recursive: true });
+  const root = await fs.mkdtemp(path.join(reposRoot, '.sling-eval-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  setEnv(t, 'PROMPTFOO_REPO', undefined);
   setEnv(t, 'PROMPTFOO_WORKSPACE_ROOT', path.join(root, 'runs'));
   const source = path.join(root, 'source');
   await fs.mkdir(source);
@@ -65,6 +75,62 @@ test('each call gets a fresh clone and ignored build outputs are not copied', as
   await assert.rejects(fs.stat(path.join(second.workingDir, 'target')), { code: 'ENOENT' });
   assert.equal((await exec('git', ['remote'], { cwd: second.workingDir })).stdout, '');
   assert.equal((await exec('git', ['status', '--porcelain'], { cwd: source })).stdout, '');
+});
+
+test('workspace requires a Git repository strictly below repos, not a prefix lookalike or project subdirectory', async (t) => {
+  const { root, source, config } = await fixture(t);
+  for (const working_dir of [undefined, null, '', ' ', 42, 'repos', reposRoot, projectRoot,
+    'repos/..', `${reposRoot}-outside/source`, '/tmp/opencode']) {
+    await assert.rejects(prepare({ ...config, working_dir }), /subdirectory of repos/);
+  }
+  await fs.mkdir(path.join(source, 'nested'));
+  await assert.rejects(prepare({ ...config, working_dir: path.join(source, 'nested') }), /root of a Git repository/);
+  await assert.rejects(prepare({ ...config, working_dir: root }), /root of a Git repository/);
+  for (const working_dir of [path.relative(projectRoot, source), `${path.relative(projectRoot, source)}/../source`]) {
+    const state = await prepare({ ...config, working_dir });
+    assert.equal(state.repository.directory, path.relative(projectRoot, source));
+  }
+});
+
+test('workspace rejects symlink escapes but accepts aliases to repositories inside repos', async (t) => {
+  const { root, source, config } = await fixture(t);
+  const outside = await fs.mkdtemp('/tmp/opencode/sling-outside-repos-test-');
+  t.after(() => fs.rm(outside, { recursive: true, force: true }));
+  await exec('git', ['clone', '--quiet', '--no-local', source, path.join(outside, 'source')]);
+  const escape = path.join(root, 'escape');
+  await fs.symlink(path.join(outside, 'source'), escape);
+  await assert.rejects(prepare({ ...config, working_dir: escape }), /subdirectory of repos.*symlinks/);
+  const alias = path.join(root, 'alias');
+  await fs.symlink(source, alias);
+  const state = await prepare({ ...config, working_dir: alias });
+  assert.equal(state.repository.directory, path.relative(projectRoot, source));
+});
+
+test('repository override selects the checkout and records origin name and its exact revision before editing', async (t) => {
+  const { root, source, config } = await fixture(t);
+  const selected = path.join(root, 'different checkout');
+  await exec('git', ['clone', '--quiet', '--no-local', source, selected]);
+  await fs.writeFile(path.join(selected, 'marker.txt'), 'selected repository\n');
+  await exec('git', ['add', '.'], { cwd: selected });
+  await exec('git', ['-c', 'user.name=Eval Test', '-c', 'user.email=eval@example.invalid',
+    '-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '-m', 'selected'], { cwd: selected });
+  const revision = (await exec('git', ['rev-parse', 'HEAD'], { cwd: selected })).stdout.trim();
+  assert.notEqual(revision, (await exec('git', ['rev-parse', 'HEAD'], { cwd: source })).stdout.trim());
+  setEnv(t, 'PROMPTFOO_REPO', path.relative(projectRoot, selected));
+  for (const origin of ['https://github.com/apache/selected-module.git', 'git@github.com:apache/selected-module.git',
+    'https://github.com/apache/selected-module/']) {
+    await exec('git', ['remote', 'set-url', 'origin', origin], { cwd: selected });
+    const state = await prepare(config);
+    assert.deepEqual(state.repository, { name: 'selected-module', revision, directory: path.relative(projectRoot, selected) });
+    assert.equal(state.baselineCommit, revision);
+    assert.equal((await exec('git', ['rev-parse', 'HEAD'], { cwd: state.workingDir })).stdout.trim(), revision);
+    assert.equal(await fs.readFile(path.join(state.workingDir, 'marker.txt'), 'utf8'), 'selected repository\n');
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(state.runDir, 'repository.json'))), state.repository);
+  }
+  setEnv(t, 'PROMPTFOO_REPO', '');
+  await assert.rejects(prepare(config), /must name a repository subdirectory/);
+  setEnv(t, 'PROMPTFOO_REPO', '/tmp/opencode');
+  await assert.rejects(prepare(config), /subdirectory of repos/);
 });
 
 test('workspace copies all skills privately and the no-skills arm needs no skill directory', async (t) => {
@@ -111,6 +177,10 @@ test('workspace result retains actual edits, new files, skill reads and bounded 
   assert.equal(response.tokenUsage.total, 48);
   assert.equal(output.status, 'completed');
   assert.equal(output.finalParent.version, '99');
+  const repository = { name: 'source', revision: state.baselineCommit, directory: path.relative(projectRoot, source) };
+  assert.deepEqual(output.repository, repository);
+  assert.deepEqual(response.metadata.repository, repository);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(state.runDir, 'repository.json'))), repository);
   assert.deepEqual(output.loadedSkills, ['update-sling-parent-pom']);
   assert.match(output.diff, /\+.*<version>99/);
   assert.match(output.diff, /src\/new.txt/);
