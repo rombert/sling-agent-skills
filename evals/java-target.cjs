@@ -4,12 +4,71 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { run, tail } = require('./process.cjs');
 const { checkUpgrade } = require('./parent-upgrade.cjs');
+const { readProject, children, child, value, text, iterText } = require('./xml.cjs');
 
 const exec = promisify(execFile);
 
 async function readTarget(file) {
-  const { stdout } = await exec('python3', [path.join(__dirname, 'pom_java_target.py'), file], { timeout: 10000 });
-  return JSON.parse(stdout);
+  const root = await readProject(file);
+  const props = new Map(children(child(root, 'properties')).map((item) => [item.name, value(item).trim()]));
+  const resolve = (initial) => {
+    let result = initial;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      if (!result.includes('${')) return result;
+      const updated = result.replace(/\$\{([^}]+)\}/g, (match, name) => props.get(name) ?? match);
+      if (updated === result) break;
+      result = updated;
+    }
+    throw new Error(`Unresolved compiler target: ${result}`);
+  };
+  const configuration = (element) => {
+    const config = child(element, 'configuration');
+    if (!config) return {};
+    const args = resolve([...iterText(config)].join(' '));
+    if (/(?:^|\s)(?:--release(?:=|\s)|-target(?:=|\s))/.test(args) ||
+        children(child(config, 'compilerArguments')).some((arg) => ['target', 'release'].includes(arg.name))) {
+      throw new Error('Custom compiler target arguments cannot be graded safely');
+    }
+    return Object.fromEntries(children(config).map((item) => [item.name, value(item).trim()]));
+  };
+  const compiler = children(child(child(root, 'build'), 'plugins'), 'plugin').find((plugin) =>
+    text(plugin, 'artifactId') === 'maven-compiler-plugin' &&
+    text(plugin, 'groupId', 'org.apache.maven.plugins') === 'org.apache.maven.plugins');
+  if (!compiler) throw new Error('No active Maven compiler plugin in the effective POM');
+  const common = configuration(compiler);
+  const target = (config, test) => {
+    const settings = [...(test ? ['testRelease'] : []), 'release', ...(test ? ['testTarget'] : []), 'target'];
+    for (const setting of settings) {
+      for (const [candidate, source] of [[config[setting], setting],
+        [props.get(`maven.compiler.${setting}`), `maven.compiler.${setting}`]]) {
+        if (!candidate) continue;
+        const resolved = resolve(candidate).replace(/^1\./, '');
+        if (!/^[1-9]\d?$/.test(resolved)) throw new Error(`Invalid compiler target: ${resolved}`);
+        return { target: Number(resolved), setting: source };
+      }
+    }
+    throw new Error('No resolved compiler release/target; refusing to infer it from the build JDK');
+  };
+  const evidence = [];
+  for (const execution of children(child(compiler, 'executions'), 'execution')) {
+    const goals = child(execution, 'goals');
+    if (!goals) continue;
+    const config = { ...common, ...configuration(execution) };
+    for (const goal of children(goals, 'goal')) {
+      if (!['compile', 'testCompile'].includes(value(goal))) continue;
+      if (text(execution, 'phase') === 'none') throw new Error('Compiler execution disabled');
+      const kind = value(goal) === 'testCompile' ? 'test' : 'main';
+      evidence.push({ kind, execution: text(execution, 'id'), ...target(config, kind === 'test') });
+    }
+  }
+  for (const kind of ['main', 'test']) {
+    if (!evidence.some((item) => item.kind === kind)) {
+      evidence.push({ kind, execution: 'implicit-default', ...target(common, kind === 'test') });
+    }
+  }
+  const targets = Object.fromEntries(['main', 'test'].map((kind) =>
+    [kind, [...new Set(evidence.filter((item) => item.kind === kind).map((item) => item.target))].sort((a, b) => a - b)]));
+  return { targets, evidence };
 }
 
 async function checkJavaTarget(metadata) {

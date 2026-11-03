@@ -1,12 +1,15 @@
 const path = require('node:path');
-const { execFile } = require('node:child_process');
-const { promisify } = require('node:util');
-
-const exec = promisify(execFile);
+const { readProject, child, text } = require('./xml.cjs');
 
 async function readParent(file) {
-  const { stdout } = await exec('python3', [path.join(__dirname, 'pom_parent.py'), file], { timeout: 10000 });
-  return JSON.parse(stdout);
+  const parent = child(await readProject(file), 'parent');
+  if (!parent) throw new Error('No direct project parent found');
+  const result = {};
+  for (const field of ['groupId', 'artifactId', 'version']) {
+    result[field] = text(parent, field);
+    if (!result[field]) throw new Error(`Missing parent ${field}`);
+  }
+  return result;
 }
 
 const coordinates = (parent) => `${parent.groupId}:${parent.artifactId}:${parent.version}`;

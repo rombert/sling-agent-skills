@@ -1,0 +1,15 @@
+{
+  "name": "sling-agent-skills-evals",
+  "private": true,
+  "description": "Evaluation tooling for Apache Sling Agent Skills",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test:evals": "node --test evals/*.test.cjs"
+  },
+  "dependencies": {
+    "saxes": "6.0.0"
+  }
+}

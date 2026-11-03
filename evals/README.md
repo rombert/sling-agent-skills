@@ -6,17 +6,20 @@ both arms. Promptfoo runs the evaluations and grades the actual repository edits
 Run from the repository root:
 
 ```sh
+npm ci
 make run-evals
 # or:
 sops exec-env .env 'npx promptfoo@0.125.1 eval --no-cache'
 ```
 
-Requires Node.js 22.19+, Python 3 (standard library only), Git, Java, Maven,
+Requires Node.js 22.19+, Git, Java, Maven,
 `LITELLM_API_KEY`, and the locally installed `pi` CLI.
 The Pi integration is tested with **Pi 1.4.0** (`@earendil-works/pi-coding-agent`).
-It does not install an SDK or depend on a project-local Node package.
-Python parses the actual parent XML for deterministic checks. The version-specific
-Maven wrappers documented in the main README are available as optional tools.
+The only project-local Node dependency is the pinned `saxes` XML parser (installed
+with `npm ci`); no Pi SDK is installed. The graders parse the actual parent and
+effective POM XML in JavaScript, respecting XML namespaces and declared encodings.
+Malformed XML and DTDs are rejected. The version-specific Maven wrappers documented
+in the main README are available as optional tools.
 
 Select the skills arm with `ARM=with-skills|without-skills|both` (`both` is the
 default):
@@ -79,7 +82,7 @@ model calls or real Maven builds:
 
 ```sh
 npx promptfoo@0.125.1 validate config
-node --test evals/*.test.cjs
+npm run test:evals
 ```
 
 An opt-in integration test invokes the **real installed Pi**, using only a local
