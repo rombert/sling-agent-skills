@@ -9,8 +9,15 @@ const grade = require('./maven-verify.cjs');
 const parentGrade = require('./parent-upgrade.cjs');
 const skillGrade = require('./skill-usage.cjs');
 const { executeTool, htmlToText, readText, run, safePath } = require('./tools.cjs');
+const { toolKey } = require('./tool-key.cjs');
 
 const exec = promisify(execFile);
+
+test('tool repetition keys normalize nested object keys but preserve array order', () => {
+  assert.equal(toolKey('read', { path: 'pom.xml', options: { end: 4, start: 1 } }),
+    toolKey('read', { options: { start: 1, end: 4 }, path: 'pom.xml' }));
+  assert.notEqual(toolKey('bash', { args: ['a', 'b'] }), toolKey('bash', { args: ['b', 'a'] }));
+});
 const pom = (version = '52', artifact = 'sling-bundle-parent', group = 'org.apache.sling') =>
   `<project><parent><groupId>${group}</groupId><artifactId>${artifact}</artifactId><version>${version}</version></parent></project>\n`;
 
@@ -86,6 +93,8 @@ test('with-skills run loads instructions, edits files, and returns the actual di
   assert.equal(result.error, undefined);
   assert.equal(result.cached, false);
   assert.equal(result.tokenUsage.total, 48);
+  assert.equal(requests[0].temperature, 0);
+  assert.equal(requests[0].max_tokens, 8192);
   assert.equal(JSON.parse(result.output).status, 'completed');
   assert.match(result.metadata.workspaceDiff, /\+.*<version>99/);
   assert.match(result.metadata.workspaceDiff, /src\/new.txt/);
@@ -99,6 +108,37 @@ test('with-skills run loads instructions, edits files, and returns the actual di
   assert.match(await fs.readFile(path.join(result.metadata.workingDir, 'pom.xml'), 'utf8'), /<version>99/);
   assert.equal((await exec('git', ['remote'], { cwd: result.metadata.workingDir })).stdout, '');
   assert.equal((await exec('git', ['status', '--porcelain'], { cwd: source })).stdout, '');
+});
+
+test('CJS forwards shared generation settings rather than hard-coding sampling', async (t) => {
+  const { config } = await fixture(t);
+  const requests = [];
+  mockModel(t, [finish('Blocked.', 'blocked')], requests);
+  const result = await new Provider({ config: { ...config, model: 'shared-model', temperature: 0.25, maxTokens: 1024,
+    chatTemplateKwargs: { enable_thinking: false } } }).callApi('Upgrade');
+  assert.equal(requests[0].model, 'shared-model');
+  assert.equal(requests[0].temperature, 0.25);
+  assert.equal(requests[0].max_tokens, 1024);
+  assert.deepEqual(requests[0].chat_template_kwargs, { enable_thinking: false });
+  assert.deepEqual(result.metadata.chatTemplateKwargs, { enable_thinking: false });
+});
+
+test('CJS enables server thinking without sending Pi context settings', async (t) => {
+  const { config } = await fixture(t);
+  const requests = [];
+  mockModel(t, [finish('Blocked.', 'blocked')], requests);
+  const result = await new Provider({ config: { ...config, model: 'qwen3.8-27b',
+    temperature: 0, maxTokens: 8192, contextWindow: 131072,
+    piCompaction: { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 },
+    chatTemplateKwargs: { enable_thinking: true } } }).callApi('Upgrade');
+  assert.equal(result.error, undefined);
+  assert.equal(requests[0].model, 'qwen3.8-27b');
+  assert.equal(requests[0].temperature, 0);
+  assert.equal(requests[0].max_tokens, 8192);
+  assert.deepEqual(requests[0].chat_template_kwargs, { enable_thinking: true });
+  assert.equal(requests[0].contextWindow, undefined);
+  assert.equal(requests[0].piCompaction, undefined);
+  assert.deepEqual(result.metadata.chatTemplateKwargs, { enable_thinking: true });
 });
 
 test('without-skills run has identical tools but cannot load a skill', async (t) => {

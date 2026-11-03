@@ -1,81 +1,8 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const os = require('node:os');
-const { execFile } = require('node:child_process');
-const { promisify } = require('node:util');
-const { definitions, executeTool, listFiles, readText } = require('./tools.cjs');
-const { readParent } = require('./parent-upgrade.cjs');
-
-const exec = promisify(execFile);
-const projectRoot = path.resolve(__dirname, '..');
-
-async function git(cwd, args) {
-  const { stdout } = await exec('git', args, {
-    cwd, maxBuffer: 20 * 1024 * 1024,
-    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
-  });
-  return stdout;
-}
-
-async function prepare(config) {
-  const source = await fs.realpath(path.resolve(projectRoot, config.working_dir));
-  if ((await git(source, ['rev-parse', '--show-toplevel'])).trim() !== source) {
-    throw new Error('working_dir must be the root of a Git repository');
-  }
-  if ((await git(source, ['status', '--porcelain', '--untracked-files=normal'])).trim()) {
-    throw new Error('The source repository must be clean; commit or move local changes before evaluating');
-  }
-  const baselineCommit = (await git(source, ['rev-parse', 'HEAD'])).trim();
-  const tempRoot = process.env.PROMPTFOO_WORKSPACE_ROOT || path.join(os.tmpdir(), 'opencode');
-  await fs.mkdir(tempRoot, { recursive: true });
-  const runDir = await fs.mkdtemp(path.join(tempRoot, 'sling-skill-eval-'));
-  const workingDir = path.join(runDir, 'project');
-  await git(source, ['clone', '--quiet', '--no-local', '--no-hardlinks', source, workingDir]);
-  await git(workingDir, ['checkout', '--quiet', '--detach', baselineCommit]);
-  await git(workingDir, ['remote', 'remove', 'origin']);
-  const skills = [];
-  if (config.install_skills) {
-    const installed = path.join(runDir, 'skills');
-    await fs.cp(path.resolve(projectRoot, config.skills_dir), installed, { recursive: true });
-    for (const entry of await fs.readdir(installed, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const directory = path.join(installed, entry.name);
-      const { text } = await readText(path.join(directory, 'SKILL.md'));
-      skills.push({
-        name: entry.name,
-        description: text.match(/^description:\s*(.+)$/m)?.[1] ?? entry.name,
-        directory,
-      });
-    }
-  }
-  const initialParent = await readParent(path.join(workingDir, 'pom.xml'));
-  return { runDir, workingDir, baselineCommit, initialParent, skills, config, mavenCalls: 0 };
-}
-
-async function diff(workingDir, baselineCommit) {
-  let patch = await git(workingDir, ['diff', '--no-ext-diff', baselineCommit, '--', '.']);
-  for (const file of (await git(workingDir, ['ls-files', '--others', '--exclude-standard', '-z'])).split('\0').filter(Boolean)) {
-    try {
-      patch += await git(workingDir, ['diff', '--no-ext-diff', '--no-index', '--', '/dev/null', file]);
-    } catch (error) {
-      if (error.code !== 1) throw error; // git diff exits 1 when files differ.
-      patch += error.stdout;
-    }
-  }
-  return patch;
-}
-
-function shorten(text, limit) {
-  if (text.length <= limit) return text;
-  const tail = Math.min(300, Math.floor(limit / 4));
-  return `${text.slice(0, limit - tail)}\n[truncated; full result retained in run artifacts]\n${text.slice(-tail)}`;
-}
-
-function toolKey(name, args) {
-  const canonical = (value) => Array.isArray(value) ? value.map(canonical) :
-    value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
-  return `${name}:${JSON.stringify(canonical(args))}`;
-}
+const { definitions, executeTool, listFiles } = require('./tools.cjs');
+const { prepare, shorten, result } = require('./workspace.cjs');
+const { toolKey } = require('./tool-key.cjs');
 
 function compactHistory(history, turn, recentTurns) {
   for (const item of history) {
@@ -92,17 +19,6 @@ function compactHistory(history, turn, recentTurns) {
   }
 }
 
-function graderSources(toolCalls) {
-  const byUrl = new Map(toolCalls.filter((call) => call.name === 'fetch_url').map((call) => [call.input?.url, call]));
-  let remaining = 16000;
-  return [...byUrl.values()].map((call) => {
-    const text = JSON.stringify(call.output);
-    const output = shorten(text, Math.max(100, Math.min(4000, remaining)));
-    remaining = Math.max(0, remaining - output.length);
-    return { url: call.input?.url, is_error: Boolean(call.is_error), output };
-  }).filter((_call, index) => index < 12);
-}
-
 module.exports = class CodingProvider {
   constructor(options) {
     this.config = options.config;
@@ -117,7 +33,7 @@ module.exports = class CodingProvider {
     let state;
     const toolCalls = [];
     const skillCalls = [];
-    const tokenUsage = { prompt: 0, completion: 0, total: 0 };
+    const tokenUsage = { prompt: 0, completion: 0, total: 0, completionDetails: { reasoning: 0 } };
     try {
       state = await prepare(this.config);
       state.signal = options.abortSignal;
@@ -150,7 +66,9 @@ module.exports = class CodingProvider {
         const response = await fetch(`${this.config.apiBaseUrl.replace(/\/$/, '')}/chat/completions`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${process.env.LITELLM_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: this.config.model, messages, tools: definitions, temperature: 0 }),
+          body: JSON.stringify({ model: this.config.model, messages, tools: definitions,
+            temperature: this.config.temperature ?? 0, max_tokens: this.config.maxTokens ?? 8192,
+            ...(this.config.chatTemplateKwargs ? { chat_template_kwargs: this.config.chatTemplateKwargs } : {}) }),
           signal: AbortSignal.any([AbortSignal.timeout(300000), ...(options.abortSignal ? [options.abortSignal] : [])]),
         });
         if (!response.ok) throw new Error(`LiteLLM HTTP ${response.status}: ${(await response.text()).slice(0, 2000)}`);
@@ -159,6 +77,7 @@ module.exports = class CodingProvider {
         tokenUsage.prompt += data.usage?.prompt_tokens ?? 0;
         tokenUsage.completion += data.usage?.completion_tokens ?? 0;
         tokenUsage.total += data.usage?.total_tokens ?? 0;
+        tokenUsage.completionDetails.reasoning += data.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
         const choice = data.choices?.[0];
         const message = choice?.message;
         if (!message) throw new Error(`LiteLLM returned no message: ${JSON.stringify(data).slice(0, 2000)}`);
@@ -221,29 +140,10 @@ module.exports = class CodingProvider {
         if (state.completion) break;
       }
       state.completion ??= { status: 'incomplete', summary: `Model did not call finish_task within ${this.config.maxTurns ?? 80} turns.` };
-      const { summary } = state.completion;
-      const workspaceDiff = await diff(state.workingDir, state.baselineCommit);
-      await fs.writeFile(path.join(state.runDir, 'changes.patch'), workspaceDiff);
-      await fs.writeFile(path.join(state.runDir, 'summary.txt'), summary);
-      await fs.writeFile(path.join(state.runDir, 'completion.json'), JSON.stringify(state.completion, null, 2));
-      let finalParent;
-      try { finalParent = await readParent(path.join(state.workingDir, 'pom.xml')); }
-      catch (error) { finalParent = { error: error.message }; }
-      return {
-        // The grader sees actual edits and fetched sources, not just self-report.
-        output: JSON.stringify({ ...state.completion, initialParent: state.initialParent, finalParent,
-          loadedSkills: skillCalls.filter((call) => !call.is_error).map((call) => call.name),
-          diff: shorten(workspaceDiff, 60000), sources: graderSources(toolCalls) }),
-        cached: false,
-        tokenUsage,
-        metadata: {
-          workingDir: state.workingDir, runDir: state.runDir,
-          baselineCommit: state.baselineCommit, workspaceDiff,
-          initialParent: state.initialParent, completion: state.completion, turns,
-          skillsInstalled: Boolean(this.config.install_skills),
-          skillCalls, toolCalls, mavenTimeoutMs: this.config.mavenTimeoutMs,
-        },
-      };
+      return await result(state, { toolCalls, skillCalls, tokenUsage, turns, harness: 'cjs',
+        model: this.config.model, apiBaseUrl: this.config.apiBaseUrl,
+        temperature: this.config.temperature ?? 0, maxTokens: this.config.maxTokens ?? 8192,
+        chatTemplateKwargs: this.config.chatTemplateKwargs });
     } catch (error) {
       return { error: error.message, cached: false, tokenUsage, metadata: { runDir: state?.runDir } };
     }
