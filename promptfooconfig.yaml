@@ -13,6 +13,7 @@ providers:
       apiBaseUrl: https://llm.apache.org/v1
       temperature: 0
       maxTokens: 8192
+      maxRetries: 0 # Disable Promptfoo retries of the entire coding task, including on HTTP 429.
       # Verified against llm.apache.org for this Qwen model. Revisit when changing models.
       chatTemplateKwargs:
         enable_thinking: true

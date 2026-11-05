@@ -54,7 +54,11 @@ make run-evals ARM=with-skills RUNS=3 # Three runs per test, with skills only
 ```
 
 This passes `--repeat` to Promptfoo, keeping the individual results in one
-evaluation record. Runs remain serial; no retries are added for failures.
+evaluation record. Runs remain serial. The shared coding-provider setting
+`maxRetries: 0` disables Promptfoo's whole-task retries, including on HTTP 429:
+a failed coding attempt is recorded rather than restarted in a fresh clone.
+Pi's own request retries are also disabled. The grading provider is configured
+separately and is not affected by this coding-provider setting.
 
 The configuration runs `pi-with-skills` and `pi-without-skills`. Builds remain
 serial to avoid contention in the shared Maven repository. Invalid arm or

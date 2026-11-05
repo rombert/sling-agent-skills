@@ -18,7 +18,7 @@ test('shared evaluation config enables thinking and uses the verified large-mode
   const yaml = await fs.readFile(path.join(cwd, 'promptfooconfig.yaml'), 'utf8');
   assert.match(yaml, /config: &codingConfig\n/);
   for (const [key, value] of Object.entries({ model: 'qwen3.8-27b', temperature: 0,
-    maxTokens: 8192, enable_thinking: true, contextWindow: 131072,
+    maxTokens: 8192, maxRetries: 0, enable_thinking: true, contextWindow: 131072,
     reserveTokens: 16384, keepRecentTokens: 20000, maxToolRepeats: 3 })) {
     const lines = yaml.split('\n').filter((line) => line.trimStart().startsWith(`${key}:`));
     assert.equal(lines.length, 1, `${key} must be shared, not overridden per variant`);
