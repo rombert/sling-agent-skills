@@ -4,3 +4,9 @@
 [submodule "repos/org-apache-sling-discovery-standalone"]
 	path = repos/org-apache-sling-discovery-standalone
 	url = https://github.com/apache/sling-org-apache-sling-discovery-standalone
+[submodule "repos/org-apache-sling-jcr-packageinit"]
+	path = repos/org-apache-sling-jcr-packageinit
+	url = https://github.com/apache/sling-org-apache-sling-jcr-packageinit
+[submodule "repos/org-apache-sling-junit-healthcheck"]
+	path = repos/org-apache-sling-junit-healthcheck
+	url = https://github.com/apache/sling-org-apache-sling-junit-healthcheck.git
