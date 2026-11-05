@@ -17,11 +17,12 @@ Use when the user asks to upgrade the Sling parent POM version in their project.
     - assume the unchanged project would pass with its required Java version; do not switch to version-specific Maven wrappers just to prove the baseline unless the user explicitly asks
     - if the baseline fails for a reason unrelated to the Java version, abort execution and inform the user of the root cause before changing the parent POM
 - check if any known workarounds exist, but do not remove them yet
+- identify the current coordinates and version of the Sling parent POM in the user's project
+- determine the target Sling parent POM version for the applicable parent artifact
+    - if the user requests a specific version, target that exact supported release
+    - otherwise, determine and target the latest available supported release
 - if other repos in the same workspace/org use the same parent artifact and test patterns (e.g. pax-exam quickstart ITs), check whether one has already been migrated to the target parent version — its pinned test/IT dependency versions are a validated reference point and can save significant troubleshooting
-- identify the current version of the Sling parent POM in the user's project
-- determine the latest available Sling parent POM version for the applicable parent artifact
-    - target the latest available version, not merely the next increment
-- check `https://cwiki.apache.org/confluence/spaces/SLING/pages/284790344/Update+to+Parent+60`for additional instructions. Follow any steps it documents that are not already covered by this skill's reference files
+- if the target parent version is 60 or newer, check `https://cwiki.apache.org/confluence/spaces/SLING/pages/284790344/Update+to+Parent+60` for additional instructions. Follow any steps it documents that are not already covered by this skill's reference files
 - update the parent POM version
 - run `mvn validate` with the current Java version before running a full build
     - if `mvn validate` fails, fix any POM syntax issues first
