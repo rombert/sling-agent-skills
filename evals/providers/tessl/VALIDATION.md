@@ -1,6 +1,6 @@
 # Validation record — 2026-11-06
 
-## Outcome: first real migration independently verified; full catalog validation next
+## Outcome: first real migration independently verified; full catalog batch in progress
 
 The standalone skills-arm migration completed hosted setup, solving, scoring,
 automatic download and independent executable verification. Parent 52, Java 8
@@ -9,8 +9,8 @@ judge scored **9/10**; the sole missing point was transcript-based skill evidenc
 while native activation metadata separately confirmed successful skill-tool use.
 New generations enforce activation through a mandatory metadata audit instead
 of an unsupported judge item. Historical scores remain unchanged. Full catalog/
-both-arm validation is next, not yet demonstrated; scores, executable checks and
-activation audits are distinct evidence.
+both-arm batch has entered native submission, but results are not yet available.
+Scores, executable checks and activation audits are distinct evidence.
 
 ## Troubleshooting and credit record
 
@@ -152,6 +152,13 @@ duplicate archives were atomically coalesced without changing their bytes or
 paths; source, results and logs were retained. No native fixture or task changed.
 Generation `6514ef39-3f5e-40be-be31-d6a8ee650f3c` passed the corrected five-project
 local preflight and is prepared for the ten-solve, both-arm native batch.
+The subsequent launch passed local preparation and wrote submission ledger
+`fe9d143df7c77c584e97dbfadd4324a428059e6d56647f9985813a18ee7a76de-1.json`.
+The CLI quoted **100 platform credits plus variable AI usage**, not a finalized
+charge. The batch covers all five scenarios, both explicit arms, one repetition
+each. Results and actual credits are pending. Do not resubmit this fingerprint
+on timeout; inspect the retained native response and collect results read-only.
+The relevant offline suites now pass **30 tests**, with one opt-in skipped.
 
 Actual hosted diagnostic logs confirm:
 
