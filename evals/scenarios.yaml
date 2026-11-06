@@ -3,44 +3,9 @@
 # Fixture setup and expected results are harness data, not part of the user prompt.
 schema_version: 1
 
-# Existing checkouts are pinned inventory, not yet calibrated agent tasks.
-# Do not invent expected test totals or silently use their moving HEADs.
-fixtures:
-  - id: discovery-standalone
-    repository:
-      url: https://github.com/apache/sling-org-apache-sling-discovery-standalone.git
-      revision: 48c24b4dc5f8ef37018d4421e80cdffd2f2a8e29
-      local_path: repos/org-apache-sling-discovery-standalone
-    initial_parent: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "46"}
-    status: needs_calibration
-    notes: Small bundle; qualify a forward parent upgrade while preserving its inherited Java 8 bytecode target.
-
-  - id: jcr-packageinit
-    repository:
-      url: https://github.com/apache/sling-org-apache-sling-jcr-packageinit.git
-      revision: 988079565c8cf80551f3bb12a0d1a1e781dc677d
-      local_path: repos/org-apache-sling-jcr-packageinit
-    initial_parent: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "52"}
-    status: needs_calibration
-    notes: Explicit Java 8 bytecode target and Mockito 2.21.0; qualify a forward migration and Java 21 test compatibility.
-
-  - id: junit-healthcheck
-    repository:
-      url: https://github.com/apache/sling-org-apache-sling-junit-healthcheck.git
-      revision: 739816308123a4b68de8bd259babe3dcd62e008a
-      local_path: repos/org-apache-sling-junit-healthcheck
-    initial_parent: {group_id: org.apache.sling, artifact_id: sling, version: "43"}
-    status: needs_calibration
-    notes: Candidate parent-43-to-46 migration with legacy SCR and Felix bundle plugin setup; validate baseline and migration first.
-
-  - id: discovery-impl
-    repository:
-      url: https://github.com/apache/sling-org-apache-sling-discovery-impl.git
-      revision: 8743059e9f26b26eb84a06a800071736271db208
-      local_path: repos/sling-org-apache-sling-discovery-impl
-    initial_parent: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "52"}
-    status: needs_calibration
-    notes: Larger test suite with existing slow-test exclusions; establish effective bytecode and exact default test totals before enabling.
+# All existing repositories are calibrated below. Future uncalibrated inventory
+# belongs here, never in the runnable list with guessed targets or test totals.
+fixtures: []
 
 scenarios:
   - id: jcr-js-nodetypes-parent-34-to-46
@@ -224,3 +189,247 @@ scenarios:
           verification fails on Java 21's reflection restrictions. Parent 46
           replaces it with tools-maven-plugin 1.4 while retaining strict checks.
       reference_revision: e06e10b580f41747a366762083a4e5f34e5cce98
+
+  - id: discovery-standalone-parent-46-to-52
+    description: Upgrade a small DS bundle to parent 52 without raising inherited Java 8 bytecode.
+    skill: update-sling-parent-pom
+    repository:
+      url: https://github.com/apache/sling-org-apache-sling-discovery-standalone.git
+      revision: 48c24b4dc5f8ef37018d4421e80cdffd2f2a8e29
+      local_path: repos/org-apache-sling-discovery-standalone
+    environment:
+      java_major: 21
+      required_tools: [git, java, mvn]
+      network: true
+      command_timeout_seconds: 1200
+    fixture:
+      initial_parent: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "46"}
+      initial_java_bytecode_target: 8
+      baseline: after_setup
+      baseline_build: {command: mvn clean verify, expected_result: success, reason: All six existing tests pass on Java 21.}
+    prompt: |
+      Upgrade this project to org.apache.sling:sling-bundle-parent version 52.
+      Use the available Java 21 and Maven environment and make the necessary
+      migration changes so that mvn clean verify succeeds. Preserve the original
+      Java 8 bytecode target and the bundle's behavior and metadata. Do not skip
+      tests, weaken checks, or override parent-managed plugin versions to hide
+      compatibility failures. Do not stage changes, commit, or push. Summarize
+      your changes and the verification results.
+    checks:
+      - {id: parent, type: pom_parent, path: pom.xml, expected: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "52"}}
+      - {id: maven_verify, type: command, command: mvn clean verify, expected_exit_code: 0}
+      - {id: java_bytecode, type: class_major_version, paths: [target/classes/**/*.class, target/test-classes/**/*.class], expected: 52}
+      - {id: java_tests, type: junit_reports, paths: [target/surefire-reports/TEST-*.xml], expected: {tests: 6, failures: 0, errors: 0, skipped: 0}}
+      - id: bundle_metadata
+        type: jar_manifest
+        path: target/org.apache.sling.discovery.standalone-1.0.5-SNAPSHOT.jar
+        expected:
+          Bundle-SymbolicName: org.apache.sling.discovery.standalone
+          export_packages: []
+          required_entries:
+            - OSGI-INF/org.apache.sling.discovery.impl.standalone.NoClusterDiscoveryService.xml
+            - OSGI-INF/metatype/org.apache.sling.discovery.impl.standalone.Config.xml
+    criteria:
+      - id: migration_quality
+        description: |
+          Require parent 52, explicit dependency scopes (provided for SLF4J API
+          and OSGi framework, test for JUnit and SLF4J Simple), and replacement of
+          the banned aggregate osgi.core dependency with the OSGi framework chapter
+          artifact. Preserve the effective Java 8 main and test targets despite
+          parent 52's Java 11 default. Do not change production or test behavior,
+          DS services, references, or metatype definitions.
+      - id: verification_integrity
+        description: |
+          Require clean Java 21 verification with all six tests and major-52
+          main/test classes. Enforcer, RAT, legal-file and baseline checks must
+          remain enabled. Do not add test exclusions, check skips, JVM --add-opens
+          workarounds, or overrides of parent-managed plugin versions.
+      - id: scope_and_git_hygiene
+        description: Limit edits to necessary POM migration changes. Do not stage, commit, push, reset or rewrite history; judge agent actions separately from fixture preparation.
+    provenance: {calibration: evals/CALIBRATION.md}
+
+  - id: jcr-packageinit-parent-52-to-60
+    description: Adopt parent 60 and mandatory formatting while retaining explicit Java 8 compatibility.
+    skill: update-sling-parent-pom
+    repository:
+      url: https://github.com/apache/sling-org-apache-sling-jcr-packageinit.git
+      revision: 988079565c8cf80551f3bb12a0d1a1e781dc677d
+      local_path: repos/org-apache-sling-jcr-packageinit
+    environment:
+      java_major: 21
+      required_tools: [git, java, mvn]
+      network: true
+      command_timeout_seconds: 1200
+    fixture:
+      initial_parent: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "52"}
+      initial_java_bytecode_target: 8
+      baseline: after_setup
+      baseline_build: {command: mvn clean verify, expected_result: success, reason: All six existing tests pass with the pinned Mockito dependency on Java 21.}
+    prompt: |
+      Upgrade this project to org.apache.sling:sling-bundle-parent version 60.
+      Use the available Java 21 and Maven environment and make the necessary
+      migration changes so that mvn clean verify succeeds. Preserve the original
+      Java 8 bytecode target and the bundle's behavior and metadata. Do not skip
+      tests, weaken checks, or override parent-managed plugin versions to hide
+      compatibility failures. Necessary parent-required source formatting is
+      allowed, but do not change production behavior or test assertions.
+      Do not stage changes, commit, or push. Summarize your changes and the
+      verification results.
+    checks:
+      - {id: parent, type: pom_parent, path: pom.xml, expected: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "60"}}
+      - {id: maven_verify, type: command, command: mvn clean verify, expected_exit_code: 0}
+      - {id: java_bytecode, type: class_major_version, paths: [target/classes/**/*.class, target/test-classes/**/*.class], expected: 52}
+      - {id: java_tests, type: junit_reports, paths: [target/surefire-reports/TEST-*.xml], expected: {tests: 6, failures: 0, errors: 0, skipped: 0}}
+      - id: bundle_metadata
+        type: jar_manifest
+        path: target/org.apache.sling.jcr.packageinit-1.0.7-SNAPSHOT.jar
+        expected:
+          Bundle-SymbolicName: org.apache.sling.jcr.packageinit
+          export_packages: []
+          required_entries:
+            - OSGI-INF/org.apache.sling.jcr.packageinit.impl.ExecutionPlanRepoInitializer.xml
+            - OSGI-INF/metatype/org.apache.sling.jcr.packageinit.impl.ExecutionPlanRepoInitializer$Config.xml
+    criteria:
+      - id: migration_quality
+        description: |
+          Require parent 60 and its Spotless formatting without behavioral or
+          assertion changes. Retain the explicit sling.java.version=8 property,
+          repository-initializer DS service and configuration. The calibrated
+          migration needs only the parent edit and spotless:apply. Mockito 2.21.0
+          already passes this suite on Java 21; do not require or reward an
+          unrelated dependency upgrade merely because the version is old.
+      - id: verification_integrity
+        description: Require full clean Java 21 verification with six tests and major-52 main/test bytecode. Spotless, Enforcer, RAT, legal-file and baseline checks must execute. Reject added skips, exclusions, JVM workarounds and parent-managed plugin version overrides.
+      - id: scope_and_git_hygiene
+        description: Allow only the parent edit and required Java formatting. The task explicitly forbids commits, including formatting commits; do not add blame-ignore entries for nonexistent commits. Do not stage, push, reset or rewrite history.
+    provenance: {calibration: evals/CALIBRATION.md}
+
+  - id: junit-healthcheck-parent-43-to-46
+    description: Migrate a legacy SCR bundle to the Bnd/DS parent while retaining health-check configuration and Java 8.
+    skill: update-sling-parent-pom
+    repository:
+      url: https://github.com/apache/sling-org-apache-sling-junit-healthcheck.git
+      revision: 739816308123a4b68de8bd259babe3dcd62e008a
+      local_path: repos/org-apache-sling-junit-healthcheck
+    environment:
+      java_major: 21
+      required_tools: [git, java, mvn]
+      network: true
+      command_timeout_seconds: 1200
+    fixture:
+      initial_parent: {group_id: org.apache.sling, artifact_id: sling, version: "43"}
+      initial_java_bytecode_target: 8
+      baseline: after_setup
+      baseline_build:
+        command: mvn clean verify
+        expected_result: failure
+        reason: All three tests pass but inherited ianal-maven-plugin legal-file verification fails under Java 21 reflection restrictions.
+    prompt: |
+      Upgrade this project to org.apache.sling:sling-bundle-parent version 46.
+      Use the available Java 21 and Maven environment and make the necessary
+      migration changes so that mvn clean verify succeeds. Preserve the original
+      Java 8 bytecode target, health-check behavior, service registration,
+      configuration factory and metatype properties, and bundle metadata.
+      Do not skip tests, weaken checks, or override parent-managed plugin versions
+      to hide compatibility failures. Do not stage changes, commit, or push.
+      Summarize your changes and the verification results.
+    checks:
+      - {id: parent, type: pom_parent, path: pom.xml, expected: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "46"}}
+      - {id: maven_verify, type: command, command: mvn clean verify, expected_exit_code: 0}
+      - {id: java_bytecode, type: class_major_version, paths: [target/classes/**/*.class, target/test-classes/**/*.class], expected: 52}
+      - {id: java_tests, type: junit_reports, paths: [target/surefire-reports/TEST-*.xml], expected: {tests: 3, failures: 0, errors: 0, skipped: 0}}
+      - id: bundle_metadata
+        type: jar_manifest
+        path: target/org.apache.sling.junit.healthcheck-1.0.7-SNAPSHOT.jar
+        expected:
+          Bundle-SymbolicName: org.apache.sling.junit.healthcheck
+          export_packages: []
+          headers: {Sling-Test-Regexp: ".*Test"}
+          required_entries:
+            - OSGI-INF/org.apache.sling.junit.healthcheck.impl.JUnitHealthCheck.xml
+            - OSGI-INF/metatype/org.apache.sling.junit.healthcheck.impl.JUnitHealthCheck.xml
+    criteria:
+      - id: migration_quality
+        description: |
+          Require sling-bundle-parent 46, removal of bundle packaging and the
+          Felix bundle/SCR plugins, and migration from banned Felix SCR annotations
+          to OSGi DS/metatype annotations. Preserve the HealthCheck service, required
+          configuration policy, TestsManager reference, activate(Map) behavior,
+          existing configuration PID, factory designation and all five properties:
+          hc.name, hc.tags (multi-valued), hc.mbean.name, test.package.or.class and
+          test.method. Preserve Sling-Test-Regexp=.*Test and optional import
+          directives in Bnd configuration. The historical export patterns match
+          no actual classes: do not invent exports or drop behavior to satisfy Bnd.
+      - id: verification_integrity
+        description: Require clean Java 21 verification with all three tests and major-52 main/test classes. The original ianal failure must be fixed through the requested parent, not --add-opens, check suppression or parent-plugin overrides. Keep Enforcer, RAT, legal-file and baseline verification enabled.
+      - id: scope_and_git_hygiene
+        description: Allow necessary POM/Bnd and JUnitHealthCheck annotation/configuration migration only. Do not change executable health-check behavior, test assertions or unrelated files. Do not stage, commit, push, reset or rewrite history.
+    provenance: {calibration: evals/CALIBRATION.md}
+
+  - id: discovery-impl-parent-52-to-60
+    description: Adopt parent 60 formatting without changing the existing default discovery test selection or Java 11 target.
+    skill: update-sling-parent-pom
+    repository:
+      url: https://github.com/apache/sling-org-apache-sling-discovery-impl.git
+      revision: 8743059e9f26b26eb84a06a800071736271db208
+      local_path: repos/sling-org-apache-sling-discovery-impl
+    environment:
+      java_major: 21
+      required_tools: [git, java, mvn]
+      network: true
+      command_timeout_seconds: 1200
+    fixture:
+      initial_parent: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "52"}
+      initial_java_bytecode_target: 11
+      baseline: after_setup
+      baseline_build: {command: mvn clean verify, expected_result: success, reason: The existing default suite runs 45 tests; its pre-existing Slow category exclusion is unchanged.}
+    prompt: |
+      Upgrade this project to org.apache.sling:sling-bundle-parent version 60.
+      Use the available Java 21 and Maven environment and make the necessary
+      migration changes so that mvn clean verify succeeds. Preserve the original
+      Java 11 bytecode target and the bundle's behavior and metadata. Retain the
+      existing default test selection, including its pre-existing Slow category
+      exclusion, but do not add exclusions, skip tests, weaken checks, or override
+      parent-managed plugin versions to hide compatibility failures. Necessary
+      parent-required source formatting is allowed without changing production
+      behavior or test assertions. Do not stage changes, commit, or push.
+      Summarize your changes and the verification results.
+    checks:
+      - {id: parent, type: pom_parent, path: pom.xml, expected: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "60"}}
+      - {id: maven_verify, type: command, command: mvn clean verify, expected_exit_code: 0}
+      - {id: java_bytecode, type: class_major_version, paths: [target/classes/**/*.class, target/test-classes/**/*.class], expected: 55}
+      - {id: java_tests, type: junit_reports, paths: [target/surefire-reports/TEST-*.xml], expected: {tests: 45, failures: 0, errors: 0, skipped: 0}}
+      - id: bundle_metadata
+        type: jar_manifest
+        path: target/org.apache.sling.discovery.impl-1.2.13-SNAPSHOT.jar
+        expected:
+          Bundle-SymbolicName: org.apache.sling.discovery.impl
+          export_packages: []
+          required_entries:
+            - OSGI-INF/org.apache.sling.discovery.impl.Config.xml
+            - OSGI-INF/org.apache.sling.discovery.impl.DiscoveryServiceImpl.xml
+            - OSGI-INF/org.apache.sling.discovery.impl.TopologyWebConsolePlugin.xml
+            - OSGI-INF/org.apache.sling.discovery.impl.cluster.ClusterViewChangeListener.xml
+            - OSGI-INF/org.apache.sling.discovery.impl.cluster.ClusterViewServiceImpl.xml
+            - OSGI-INF/org.apache.sling.discovery.impl.cluster.voting.VotingHandler.xml
+            - OSGI-INF/org.apache.sling.discovery.impl.common.heartbeat.HeartbeatHandler.xml
+            - OSGI-INF/metatype/org.apache.sling.discovery.impl.DiscoveryServiceConfig.xml
+    criteria:
+      - id: migration_quality
+        description: |
+          Require parent 60 and its Spotless formatting, preserving effective
+          Java 11 main/test targets, DS services and configuration, and the optional
+          webconsole import directive. The calibrated solution is the parent edit
+          plus spotless:apply; do not demand unrelated production changes or Mockito
+          upgrades. Keep existing test assertions and concurrency/timing behavior.
+      - id: verification_integrity
+        description: |
+          Require all 45 default-selected tests and major-55 main/test classes.
+          The pre-existing Slow-category exclusion is allowed, but adding exclusions
+          or skips, shortening waits, disabling checks or overriding parent-managed
+          plugin versions is not. Preserve the existing includeSlowTests profile,
+          test heap and JaCoCo argument wiring. Spotless, Enforcer, RAT, legal-file
+          and baseline checks must remain enabled.
+      - id: scope_and_git_hygiene
+        description: Allow the parent change and mandatory formatting only. Honor the task's no-commit instruction even for formatting; do not create blame-ignore entries for nonexistent commits. Do not stage, push, reset or rewrite history.
+    provenance: {calibration: evals/CALIBRATION.md}

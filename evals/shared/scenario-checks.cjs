@@ -92,14 +92,17 @@ async function check(item, metadata, options = {}) {
     }
     case 'jar_manifest': {
       const [file] = await files(cwd, [item.path]);
-      const zip = unzipSync(await fs.readFile(file), { filter: (entry) => entry.name === 'META-INF/MANIFEST.MF' });
+      const required = item.expected.required_entries ?? [];
+      const zip = unzipSync(await fs.readFile(file), { filter: (entry) => entry.name === 'META-INF/MANIFEST.MF' || required.includes(entry.name) });
       if (!zip['META-INF/MANIFEST.MF']) throw new Error('Missing JAR manifest');
+      for (const name of required) if (!zip[name]?.length) throw new Error(`Missing/empty required JAR entry: ${name}`);
       const text = strFromU8(zip['META-INF/MANIFEST.MF']).replace(/\r?\n /g, '');
       const headers = Object.fromEntries(text.split(/\r?\n/).filter((line) => line.includes(': ')).map((line) => {
         const index = line.indexOf(': ');
         return [line.slice(0, index), line.slice(index + 2)];
       }));
       equal(headers['Bundle-SymbolicName'], item.expected['Bundle-SymbolicName'], 'Bundle-SymbolicName');
+      for (const [name, expected] of Object.entries(item.expected.headers ?? {})) equal(headers[name], expected, name);
       // Do not split quoted version ranges on their embedded commas.
       const clauses = (value) => (value ?? '').match(/(?:[^,"]|"[^"]*")+/g) ?? [];
       if (item.expected.export_packages) {

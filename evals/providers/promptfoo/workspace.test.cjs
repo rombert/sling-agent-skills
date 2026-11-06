@@ -51,7 +51,9 @@ async function fixture(t) {
   await fs.mkdir(source);
   await exec('git', ['init', '--quiet', source]);
   await fs.writeFile(path.join(source, 'pom.xml'), pom());
-  await fs.writeFile(path.join(source, '.gitignore'), 'target/\n');
+  // The local code-index daemon can discover these disposable repositories.
+  // Ignore only its generated metadata in test fixtures, not real user changes.
+  await fs.writeFile(path.join(source, '.gitignore'), 'target/\n.tokensave/\n');
   await exec('git', ['add', '.'], { cwd: source });
   await exec('git', ['-c', 'user.name=Eval Test', '-c', 'user.email=eval@example.invalid',
     '-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '-m', 'fixture'], { cwd: source });

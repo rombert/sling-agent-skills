@@ -45,7 +45,8 @@ async function prepareFixture(scenario, runDir, { env } = {}) {
       throw new Error('Fixture local_path origin does not match the scenario repository');
     }
   }
-  await runGit(runDir, ['clone', '--quiet', '--no-checkout', '--no-local', '--no-hardlinks', source, workingDir]);
+  await runGit(runDir, ['clone', '--quiet', '--no-checkout', '--no-local', '--no-hardlinks',
+    '-c', 'core.autocrlf=false', source, workingDir]);
   await runGit(workingDir, ['checkout', '--quiet', '--detach', scenario.repository.revision]);
   if (await runGit(workingDir, ['rev-parse', 'HEAD']) !== scenario.repository.revision) throw new Error('Fixture revision mismatch');
   await runGit(workingDir, ['remote', 'remove', 'origin']);
@@ -68,8 +69,13 @@ async function prepareFixture(scenario, runDir, { env } = {}) {
   // clone so diff grading and inherited-target checks use the prepared baseline.
   if (await runGit(workingDir, ['status', '--porcelain'])) {
     await runGit(workingDir, ['add', '--all']);
-    await runGit(workingDir, ['-c', 'user.name=Scenario Fixture', '-c', 'user.email=fixture@example.invalid',
-      '-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '--no-gpg-sign', '-m', 'Prepare evaluation fixture']);
+    const date = await runGit(workingDir, ['show', '-s', '--format=%cI', scenario.repository.revision]);
+    await exec('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '--no-gpg-sign', '-m', 'Prepare evaluation fixture'], {
+      cwd: workingDir, timeout: 120000, env: {
+        ...childEnvironment(env), GIT_AUTHOR_NAME: 'Scenario Fixture', GIT_COMMITTER_NAME: 'Scenario Fixture',
+        GIT_AUTHOR_EMAIL: 'fixture@example.invalid', GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+        GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+    });
   }
   const baselineCommit = await runGit(workingDir, ['rev-parse', 'HEAD']);
   const repository = { name: scenario.repository.url.split('/').at(-1).replace(/\.git$/, ''),

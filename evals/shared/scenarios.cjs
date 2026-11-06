@@ -47,6 +47,10 @@ function validate(scenario) {
     if (item.type === 'junit_reports') {
       check(['tests', 'failures', 'errors', 'skipped'].every((key) => Number.isSafeInteger(item.expected?.[key]) && item.expected[key] >= 0) && item.expected.tests > 0, 'invalid test totals');
     }
+    if (item.type === 'jar_manifest') {
+      check(item.path && item.expected?.['Bundle-SymbolicName'], 'bundle manifest check needs path and symbolic name');
+      check((item.expected.required_entries ?? []).every(safePath), 'unsafe required JAR entry');
+    }
   }
   check(scenario.checks.filter((c) => c.type === 'pom_parent').length === 1, 'exactly one parent check is required');
   check(scenario.checks.filter((c) => c.type === 'command').length === 1, 'exactly one verification command is required');

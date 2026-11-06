@@ -8,7 +8,7 @@ test('shared modules do not import provider adapters or depend on their contexts
   for await (const name of fs.glob('evals/shared/**/*.cjs', { cwd: projectRoot })) {
     const source = await fs.readFile(path.join(projectRoot, name), 'utf8');
     assert.doesNotMatch(source, /require\([^)]*providers\//, name);
-    assert.doesNotMatch(source, /providerResponse|componentResults|PROMPTFOO_|LITELLM_API_KEY|@earendil-works/, name);
+    assert.doesNotMatch(source, /providerResponse|componentResults|PROMPTFOO_|TESSL_|LITELLM_API_KEY|@earendil-works/, name);
   }
 });
 

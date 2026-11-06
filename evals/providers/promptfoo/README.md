@@ -145,17 +145,16 @@ without putting setup or expected answers into the coding prompt. The provider
 receives scenario data as test context and prepares a fresh baseline with
 `evals/shared/fixture.cjs`. `evals/shared/scenario-checks.cjs` independently reads actual build artifacts.
 
-The four existing `repos/` checkouts are recorded as pinned `fixtures` awaiting
-calibration. They are listed by `make list-evals`, but are not run or assigned
-invented test expectations. In particular, a checkout already on parent 46 or
-52 cannot be scored as an upgrade to parent 46. Promote each to a scenario only
-after choosing and verifying a forward target and its exact expected outputs.
+All five projects now have calibrated scenarios, including the four pinned
+`repos/` checkouts. See [calibration evidence](../../CALIBRATION.md) for forward
+targets, baseline classifications, and exact outputs. In particular, checkouts
+already on 46 or 52 have genuine forward upgrades, not tasks targeting 46.
 Hidden `.sling-*` test workspaces under `repos/` are not fixtures.
 
 Adding a provider should reuse these facts, not copy the YAML into a second
 hand-maintained test suite. Keep model/client settings in that provider's
 template and map shared criteria to its native scoring facilities. Tessl's
-documented scoring is judge-based; a future Tessl adapter must not imply native
+documented scoring is judge-based; the Tessl adapter does not imply native
 executable grading support that the framework does not provide.
 
 ### Import and smoke-test provenance

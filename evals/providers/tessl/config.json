@@ -1,0 +1,7 @@
+{
+  "agent": "claude",
+  "model": "deepseek-v4.1-flash",
+  "scorerAgent": "claude",
+  "scorerModel": "deepseek-v4.1-flash",
+  "skipForcedContextActivation": true
+}

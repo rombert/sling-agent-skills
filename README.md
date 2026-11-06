@@ -92,4 +92,6 @@ This dependency is optional but recommended.
 Shared real-repository scenarios live in [`evals/scenarios.yaml`](evals/scenarios.yaml).
 The top-level Makefile generates framework-specific configuration and runs the
 evaluations. See [`evals/README.md`](evals/README.md) for setup and a minimal
-single-scenario smoke run. Promptfoo is supported first; Tessl is deferred.
+single-scenario smoke run. Promptfoo and Tessl use the same five calibrated
+projects. Tessl has explicit solve-budget and duplicate-submission guards; see
+its [provider guide](evals/providers/tessl/README.md) before spending shared credits.

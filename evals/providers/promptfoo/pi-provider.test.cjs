@@ -42,7 +42,7 @@ async function fixture(t) {
   await fs.mkdir(source);
   await exec('git', ['init', '--quiet', source]);
   await fs.writeFile(path.join(source, 'pom.xml'), pom);
-  await fs.writeFile(path.join(source, '.gitignore'), 'target/\n');
+  await fs.writeFile(path.join(source, '.gitignore'), 'target/\n.tokensave/\n');
   await exec('git', ['add', '.'], { cwd: source });
   await exec('git', ['-c', 'user.name=Eval Test', '-c', 'user.email=eval@example.invalid',
     '-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '-m', 'fixture'], { cwd: source });

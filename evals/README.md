@@ -2,7 +2,12 @@
 
 Real-repository scenarios live in [`scenarios.yaml`](scenarios.yaml). The top-level
 Makefile selects a provider adapter to generate its native configuration and run
-evaluations. Promptfoo is implemented; Tessl and Inspect remain deferred.
+evaluations. Promptfoo and Tessl have adapters; Inspect remains deferred.
+
+**Tessl hosted validation:** setup defects have been diagnosed and reproduced
+locally; corrected scored validation is in progress. See the
+[validation record](providers/tessl/VALIDATION.md) for demonstrated scope,
+remaining limitations and actual credit usage.
 
 ## Layout and dependency boundary
 
@@ -22,6 +27,11 @@ evals/
       pi-provider.cjs, pi-eval.ts # Pi client, controls and result conversion
       workspace.cjs              # Pi skill installation and Promptfoo response
       *.test.cjs, README.md       # Adapter-specific tests and documentation
+    tessl/
+      generate.cjs, config.json  # Native scenarios, checklist and explicit variants
+      prepare.cjs, *.sh          # Git bundle packaging and sandbox setup rehearsal
+      run.cjs                   # Solve budget, submission ledger, wait and results
+      collect.cjs, verify.cjs   # Native scores and separate shared artifact checks
 ```
 
 Dependencies flow from **commands → adapter → shared helpers**, never from shared
@@ -87,10 +97,11 @@ baseline are recorded separately; diffs and inherited-bytecode checks compare
 against the prepared baseline. Original fixture checkouts are never edited,
 staged, committed, cleaned or reset.
 
-The four existing `repos/` checkouts are pinned inventory awaiting calibration,
-not runnable tasks with invented targets or test expectations. Hidden `.sling-*`
-test workspaces are not fixtures. Promote a fixture only after establishing its
-forward parent target and exact expected verification results.
+All five projects are calibrated: the JCR JavaScript bundle plus the four pinned
+`repos/` checkouts. See [CALIBRATION.md](CALIBRATION.md) for baseline classifications,
+forward targets and exact verified results. Hidden `.sling-*` test workspaces are
+not fixtures. Add future inventory under `fixtures` until it has concrete,
+verified expectations; never invent runnable targets or test totals.
 
 ## Adding a provider
 
@@ -106,7 +117,8 @@ forward parent target and exact expected verification results.
    copy shared task facts into a second maintained suite or assume every native
    scoring system supports executable checks.
 
-Tessl's documented scoring is judge-based; a future adapter must preserve that
+Tessl's documented scoring is judge-based; its adapter preserves that
 distinction rather than claim executable grading replaces its native score.
 
-Provider guide: [Promptfoo/Pi](providers/promptfoo/README.md).
+Provider guides: [Promptfoo/Pi](providers/promptfoo/README.md),
+[Tessl](providers/tessl/README.md).

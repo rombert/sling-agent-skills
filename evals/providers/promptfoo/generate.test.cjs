@@ -48,7 +48,7 @@ test('launcher rejects invalid settings, old overrides and unknown scenarios bef
   for (const ARM of ['', 'invalid', 'with-skills without-skills']) assert.throws(() => settings({ ARM }), /ARM must/);
   for (const RUNS of ['', '0', '-1', '1.5', '01', '1 2', '2 ', '1e2']) assert.throws(() => settings({ RUNS }), /RUNS must/);
   for (const key of ['BACKEND', 'REPO', 'PROMPTFOO_REPO']) assert.throws(() => settings({ [key]: 'anything' }));
-  assert.throws(() => settings({ EVAL_PROVIDER: 'tessl' }), /not implemented/);
+  assert.throws(() => settings({ EVAL_PROVIDER: 'unknown' }), /not implemented/);
   await assert.rejects(generate(settings({ SCENARIO: 'not-a-scenario' })), /Unknown scenario/);
   await assert.rejects(generate(settings({ SCENARIO: 'jcr-js-nodetypes-parent-34-to-46,jcr-js-nodetypes-parent-34-to-46' })), /must not repeat/);
 });

@@ -16,12 +16,14 @@ test('catalog is valid, pinned and rejects unknown, duplicate or unsafe definiti
   const catalog = await load();
   const scenario = structuredClone(catalog.scenarios[0]);
   assert.ok(select(catalog).length);
-  assert.equal(catalog.fixtures.length, 4);
-  assert.ok(catalog.fixtures.every((fixture) => fixture.status === 'needs_calibration' && !fixture.repository.local_path.includes('/.')));
+  assert.equal(catalog.fixtures.length, 0);
+  assert.equal(catalog.scenarios.length, 5);
+  assert.deepEqual(catalog.scenarios.map((scenario) => scenario.fixture.initial_java_bytecode_target), [8, 8, 8, 8, 11]);
   for (const mutate of [s => s.repository.revision = 'master', s => s.checks[0].expected.version = '42',
     s => s.checks[0].expected.version = '34', s => s.checks[2].expected = 61,
     s => s.checks[3].paths = ['../reports/*.xml'], s => s.checks[1].command = 'mvn -DskipTests verify',
-    s => s.checks[3].expected.tests = 0, s => s.fixture.setup[0].options = ['--unsafe-paths']]) {
+    s => s.checks[3].expected.tests = 0, s => s.fixture.setup[0].options = ['--unsafe-paths'],
+    s => s.checks.at(-1).expected.required_entries = ['../outside.xml']]) {
     const changed = structuredClone(scenario);
     mutate(changed);
     assert.throws(() => validate(changed));
@@ -62,6 +64,12 @@ test('checks fail closed for empty class/report sets, changed class targets, tes
   await fs.writeFile(path.join(dir, 'bundle.jar'), zipSync({ 'META-INF/MANIFEST.MF': strToU8(
     'Bundle-SymbolicName: example\r\nExport-Package: example.api;version="[1,2)"\r\nSling-Initial-Content: content;path:=/libs/\r\n example\r\n') }));
   assert.equal(await check(jar, metadata), 'Bundle metadata matches');
+  jar.expected.required_entries = ['OSGI-INF/missing.xml'];
+  await assert.rejects(check(jar, metadata), /required JAR entry/);
+  delete jar.expected.required_entries;
+  jar.expected.headers = { 'Sling-Test-Regexp': '.*Test' };
+  await assert.rejects(check(jar, metadata), /Sling-Test-Regexp/);
+  delete jar.expected.headers;
   jar.expected['Bundle-SymbolicName'] = 'different';
   await assert.rejects(check(jar, metadata), /Bundle-SymbolicName/);
   await fs.symlink('/etc/hosts', path.join(dir, 'escape.xml'));
@@ -76,6 +84,7 @@ test('pinned fixtures use the requested revision and checkpoint setup only in th
   const git = async (args, cwd = source) => (await exec('git', args, { cwd })).stdout.trim();
   await git(['init', '--quiet']);
   await git(['remote', 'add', 'origin', 'https://github.com/apache/fixture.git']);
+  await fs.writeFile(path.join(source, '.gitignore'), '.tokensave/\n');
   await fs.writeFile(path.join(source, 'pom.xml'), '<project><parent><groupId>org.apache.sling</groupId><artifactId>sling</artifactId><version>34</version></parent></project>\n');
   await git(['add', '.']);
   const commit = () => git(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '--no-gpg-sign', '-m', 'fixture']);

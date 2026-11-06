@@ -51,8 +51,9 @@ async function prepare(config) {
   if ((await git(source, ['rev-parse', '--show-toplevel'])).trim() !== source) {
     throw new Error('working_dir must be the root of a Git repository');
   }
-  if ((await git(source, ['status', '--porcelain', '--untracked-files=normal'])).trim()) {
-    throw new Error('The source repository must be clean; commit or move local changes before evaluating');
+  const dirty = (await git(source, ['status', '--porcelain', '--untracked-files=normal'])).trim();
+  if (dirty) {
+    throw new Error(`The source repository must be clean; commit or move local changes before evaluating: ${source}\n${dirty}`);
   }
   const baselineCommit = (await git(source, ['rev-parse', 'HEAD'])).trim();
   let name = path.basename(source);
