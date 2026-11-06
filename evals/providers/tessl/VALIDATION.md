@@ -1,12 +1,13 @@
 # Validation record — 2026-11-06
 
-## Outcome: hosted validation in progress
+## Outcome: hosted setup and solve work; native scoring blocked
 
 The provider, native conversion and five-project catalog are implemented and
-locally verified. Hosted setup failures have been diagnosed and reproduced;
-a corrected scored standalone run is in progress. Full catalog/both-arm parity
-is not yet demonstrated. Native judge scores and independent executable checks
-are always separate evidence, not interchangeable grading systems.
+locally verified. The corrected standalone run completed hosted setup and its
+coding-agent attempt. Native scoring is blocked in `compute-diff`, before the
+judge starts; the service continues retrying that step. Full catalog/both-arm
+parity is not yet demonstrated. Native judge scores and independent executable
+checks are always separate evidence, not interchangeable grading systems.
 
 ## Troubleshooting and credit record
 
@@ -23,6 +24,33 @@ not platform quotes. No automatic adapter retries or rescoring were used.
 
 Confirmed subtotal before the corrected scored run: **82.5383888 credits**.
 Local CLI validation rejections created no remote run and are not extra charges.
+
+### Corrected standalone run: scorer integration failure
+
+Run `01a1b16f-1fbd-7732-91e4-89be5557efde` passed setup in **2,750 ms** and
+completed one DeepSeek coding-agent attempt in **245,530 ms**, with **43 turns**
+and **USD 1.810409** reported AI usage. This confirms hosted setup/solve execution,
+not a passing migration: no assessment or downloadable solution was published.
+
+The CLI reached its two-hour wait limit. A subsequent read-only view showed the
+run still `pending`, with **57** native scoring-recipe attempts. Every attempt
+failed `compute-diff` with:
+
+```text
+git add failed: fatal: not a git repository (or any of the parent directories): .git
+```
+
+All scoring-model steps were skipped with zero AI tokens. These retries are
+platform-internal, not adapter resubmissions. At that inspection `credits` was
+**2.8547634**, a provisional value on a nonterminal run, not a finalized total
+or evidence that the ten-credit platform charge will be waived. The service
+exposed no solution archive; `download-solutions` failed to find the solution.
+
+The retained `native-current.json` contains the complete recipe history. Do not
+retry this solve or launch the full catalog merely to escape the pending state.
+A separate minimal scored diagnostic is testing explicit native commit-fixture
+metadata; a Git repository created only by setup may not supply the scorer's
+expected baseline contract. That hypothesis is not yet a confirmed fix.
 
 Actual hosted diagnostic logs confirm:
 

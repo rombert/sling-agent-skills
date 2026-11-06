@@ -2,10 +2,11 @@
 
 Real-repository scenarios live in [`scenarios.yaml`](scenarios.yaml). The top-level
 Makefile selects a provider adapter to generate its native configuration and run
-evaluations. Promptfoo and Tessl have adapters; Inspect remains deferred.
+evaluations. Promptfoo, Tessl and Inspect have adapters.
 
-**Tessl hosted validation:** setup defects have been diagnosed and reproduced
-locally; corrected scored validation is in progress. See the
+**Tessl hosted validation:** setup and a coding-agent attempt completed, but the
+native scorer is blocked before judging (`compute-diff` cannot find Git metadata).
+Full catalog/both-arm parity is not yet demonstrated. See the
 [validation record](providers/tessl/VALIDATION.md) for demonstrated scope,
 remaining limitations and actual credit usage.
 
@@ -14,6 +15,7 @@ remaining limitations and actual credit usage.
 ```text
 evals/
   scenarios.yaml                 # Shared tasks, pins, setup, checks and criteria
+  models.json                    # Apache gateway and Promptfoo/Inspect model selection
   options.cjs                    # Common command-line/environment selections
   generate.cjs, run.cjs, view.cjs # Provider-neutral entry points
   shared/                        # Catalog, fixtures, Maven/XML/artifact checks
@@ -21,7 +23,7 @@ evals/
     index.cjs                    # Explicit adapter registry
     promptfoo/
       index.cjs                  # Adapter entry point
-      config.yaml                # Model/client/native framework settings
+      config.yaml                # Pi/client/native framework settings
       generate.cjs, run.cjs       # Native config, CLI and credential handling
       assertions/                # Promptfoo context → plain shared check state
       pi-provider.cjs, pi-eval.ts # Pi client, controls and result conversion
@@ -32,6 +34,11 @@ evals/
       prepare.cjs, *.sh          # Git bundle packaging and sandbox setup rehearsal
       run.cjs                   # Solve budget, submission ledger, wait and results
       collect.cjs, verify.cjs   # Native scores and separate shared artifact checks
+    inspect/
+      generate.cjs, run.cjs      # Generated selections, uv and credential handling
+      tasks.py, runtime.py       # Native Inspect ReAct agent, tools and scorers
+      bridge.cjs                 # Plain JSON → existing shared fixture/check helpers
+      pyproject.toml, uv.lock    # Pinned Python runtime dependencies
 ```
 
 Dependencies flow from **commands → adapter → shared helpers**, never from shared
@@ -64,6 +71,7 @@ export PATH="$JAVA_HOME/bin:$PATH"
 make run-eval PROVIDER=promptfoo SCENARIO=jcr-js-nodetypes-parent-34-to-46 ARM=with-skills RUNS=1
 
 make test-evals
+make test-inspect # Python suite; requires uv, no gateway calls or real Maven builds
 ```
 
 `run-eval` regenerates configuration first. Generation is local: no model calls,
@@ -111,7 +119,7 @@ verified expectations; never invent runnable targets or test totals.
    does not impose a file format or single-file layout. Implement `run(options)`
    and `view()` returning exit codes, and optional `validateOptions(env)` for
    provider-only options.
-3. Keep model/client settings, credential loading, native CLI flags, context
+3. Keep client settings, credential loading, native CLI flags, context
    conversion, scoring/rubric translation and provider tests in that directory.
 4. Reuse shared fixture/check functions where the framework permits them. Do not
    copy shared task facts into a second maintained suite or assume every native
@@ -120,5 +128,11 @@ verified expectations; never invent runnable targets or test totals.
 Tessl's documented scoring is judge-based; its adapter preserves that
 distinction rather than claim executable grading replaces its native score.
 
+Promptfoo and Inspect consume the same gateway, coding/grading model IDs and
+coding generation settings from `models.json`. This file contains no credentials.
+Pi and Inspect retain their own agent/tool loops and context-management settings;
+cross-provider comparisons are not identical-agent experiments. Tessl retains its
+separate hosted model selection.
+
 Provider guides: [Promptfoo/Pi](providers/promptfoo/README.md),
-[Tessl](providers/tessl/README.md).
+[Tessl](providers/tessl/README.md), [Inspect](providers/inspect/README.md).
