@@ -26,6 +26,10 @@ cp -a /input/scenarios/${id}/resources /workspace/solution/resources
 cp /input/scenarios/${id}/init-repo.sh /workspace/solution/init-repo.sh
 cp -a /input/toolchain /workspace/solution/.eval-toolchain
 cd /workspace/solution
+# Simulate the populated tree that a native commit fixture installs.
+git init --quiet --initial-branch=main --object-format=sha1 --template= .
+git -c core.hooksPath=/dev/null fetch --quiet resources/source.bundle HEAD
+git -c advice.detachedHead=false checkout --quiet --detach "$(cat resources/baseline.txt)"
 # Hosted setup may not receive the agent's env-file variables.
 env -u EVAL_RUNTIME_ROOT -u JAVA_HOME PATH="/workspace/initial-bin:$PATH" sh ./init-repo.sh
 export JAVA_HOME=/workspace/solution/.eval-toolchain/runtime/jdk-21

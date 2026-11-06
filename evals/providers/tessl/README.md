@@ -92,19 +92,28 @@ included, matching Promptfoo's `skills_dir`, including the SCR helper skill.
 Generation performs no clones, Maven builds, credential access, or model calls.
 It does initialize the isolated local Git boundary and requires Git.
 Preparation uses the shared `prepareFixture` implementation in disposable local
-clones, creates a **Git bundle of the prepared baseline**, and rehearses the
-native include/setup sequence. Only public source history and prepared fixture
+clones, creates a **Git bundle of the prepared baseline**, imports its ref into
+the isolated generation, and rehearses the native commit/include/setup sequence.
+Only public source history and prepared fixture
 changes are bundled. Expected answers, checks and rubrics are not included in
 the sandbox's `resources/` directory. Credentials, `.env`, the harness repository
 and source working-tree build outputs are not uploaded.
 
-Do not use Tessl's `commit` fixture directly for external repositories: the CLI
-packs refs from the **local harness repository**, despite the `repoUrl` field.
-The included bundle preserves the original source SHA, prepared baseline SHA
-and pre-task history. Setup imports it at the task root, preserves any platform
-repository metadata under ignored resources, and refuses repeated setup or Git
-pointers/symlinks to another checkout. The task prompt remains byte-for-byte equal
-to the shared prompt. Fixture setup is not an agent change.
+Tessl packs `commit` fixtures from the **local generation's Git boundary**, not
+from the external URL alone. Preparation imports each prepared baseline as
+`refs/eval-fixtures/<scenario-id>` in that disposable generation, without changing
+its working tree or any source/harness refs. The generated `codebase` fixture
+uses that ref so native scoring has its expected Git baseline metadata. A
+setup-created repository alone allowed solving but failed native `compute-diff`.
+
+Native commit fixtures install a fresh, single-commit snapshot. The included
+bundle restores original source history and the exact prepared baseline into
+that repository, preserving its index/object store. Moving its `.git` aside would
+leave the installed files untracked and break checkout. Original source SHA,
+prepared baseline SHA and native starting SHA are retained separately. Setup
+refuses repeated installation and Git pointers/symlinks to another checkout.
+The task prompt remains byte-for-byte equal to the shared prompt. All fixture
+preparation is harness work, not an agent change.
 
 Tessl runs setup through **POSIX `sh`**, irrespective of its shebang. The sandbox
 needs Git, realpath, tar, sha256sum, and its preinstalled Maven. Java 21 is

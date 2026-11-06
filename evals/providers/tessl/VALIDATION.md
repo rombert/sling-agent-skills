@@ -1,13 +1,15 @@
 # Validation record — 2026-11-06
 
-## Outcome: hosted setup and solve work; native scoring blocked
+## Outcome: native commit-fixture scoring validated; migration validation in progress
 
 The provider, native conversion and five-project catalog are implemented and
-locally verified. The corrected standalone run completed hosted setup and its
-coding-agent attempt. Native scoring is blocked in `compute-diff`, before the
-judge starts; the service continues retrying that step. Full catalog/both-arm
-parity is not yet demonstrated. Native judge scores and independent executable
-checks are always separate evidence, not interchangeable grading systems.
+locally verified. Hosted setup and a coding-agent attempt completed, but that
+run's native scorer lacked a commit-fixture baseline. A minimal native commit
+fixture control subsequently completed both solving and scoring with **1/1**.
+The adapter now supplies native prepared-baseline refs and preserves their Git
+metadata; a new scored migration is in progress. Full catalog/both-arm parity
+is not yet demonstrated. Native scores and independent executable checks are
+always separate evidence, not interchangeable grading systems.
 
 ## Troubleshooting and credit record
 
@@ -21,9 +23,13 @@ not platform quotes. No automatic adapter retries or rescoring were used.
 | `01a1b154-b21d-7422-a4e0-e5abfd9ec5b2` | Unscored setup diagnostic | Completed; exposed shell/sudo assumptions | 10.5922648 |
 | `01a1b15e-a6a2-70ec-ae60-9ea2c42df437` | Rootless standalone attempt | Setup failed before model | 10 |
 | `01a1b163-447f-7787-a081-22374d3a711e` | Unscored rootless diagnostic | Completed; exposed cached Java path | 11.946124 |
+| `01a1b1df-7317-708b-8417-f63c10cdaa81` | Native commit fixture with existing custom setup | Setup failed before model; local reproduction below | 10 |
+| `01a1b1e1-3625-71dd-be86-efb852d4a8e1` | Native commit fixture, no custom setup | Solve and scoring completed; diagnostic 1/1; solution downloaded | 10.5185626 |
 
 Confirmed subtotal before the corrected scored run: **82.5383888 credits**.
 Local CLI validation rejections created no remote run and are not extra charges.
+Finalized charges across the table are **103.0569514 credits**, excluding the
+nonterminal migration runs. Diagnostic scores are not calibrated migration passes.
 
 ### Corrected standalone run: scorer integration failure
 
@@ -51,6 +57,31 @@ retry this solve or launch the full catalog merely to escape the pending state.
 A separate minimal scored diagnostic is testing explicit native commit-fixture
 metadata; a Git repository created only by setup may not supply the scorer's
 expected baseline contract. That hypothesis is not yet a confirmed fix.
+
+The first native-fixture probe failed setup before reaching the scorer. Local
+reproduction with an already-populated fixture repository showed why: moving
+`.git` aside leaves its files untracked, and the subsequent checkout refuses to
+overwrite them. Setup now preserves the native index/object store and imports
+the original bundled history into that repository. It retains the platform's
+starting SHA separately in `native-baseline.txt`. A regression covers both an
+empty platform repository and a populated, single-commit native snapshot; all
+12 Tessl adapter tests pass. No checkout force, reset or source-file deletion is
+used. This fixes the reproduced setup conflict, not yet the scorer integration.
+
+The no-custom-setup native commit-fixture control completed solving in 32,379 ms,
+`compute-diff` in 18 ms, and scoring in 26,969 ms. It scored 1/1 and exposed a
+downloadable full solution. This validates the native fixture/scorer path, not
+the outcome of any parent migration.
+
+Preparation now imports each bundled prepared-baseline ref into the isolated
+generation's Git object store and declares it as the native `codebase` commit
+fixture. The local rehearsal archives that ref and creates a populated synthetic
+snapshot before running setup, matching the native lifecycle. Original source
+history is imported into the existing repository. The tests verify deterministic
+baseline identity, populated native repository handling and retained native SHA.
+All 14 Tessl tests pass (one opt-in skipped), and the rootless container/reference
+build passed separately against a populated fixture. The new scored standalone
+generation is `3e99b1f6-2fc0-4d95-a34c-3bd4f5defbe9`.
 
 Actual hosted diagnostic logs confirm:
 

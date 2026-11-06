@@ -9,7 +9,7 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { prepareFixture } = require('../../shared/fixture.cjs');
 const { childEnvironment } = require('../../shared/process.cjs');
-const { writeJson, digest } = require('./generate.cjs');
+const { writeJson, digest, fixtureRef } = require('./generate.cjs');
 const exec = promisify(execFile);
 
 // The Tessl login belongs to the CLI, not to Maven, Git, or the uploaded inputs.
@@ -71,9 +71,28 @@ async function prepare(manifest, { toolchain = provisionToolchain } = {}) {
       cwd: fixture.workingDir, env: environment(), timeout: 120000, maxBuffer: 1024 * 1024 });
     await fs.writeFile(path.join(resources, 'baseline.txt'), fixture.baselineCommit + '\n');
     await writeJson(path.join(resources, 'repository.json'), fixture.repository);
-    // Test the actual native include/setup format without submitting a solve.
+    // Tessl packs commit fixtures from the generation's Git boundary, not the
+    // remote repoUrl. Import the prepared baseline there without checkout or
+    // touching any source/harness refs. Native scoring needs this fixture's Git
+    // metadata in addition to the history installed by our setup script.
+    const ref = fixtureRef(scenario);
+    await exec('git', ['fetch', '--quiet', path.join(resources, 'source.bundle'), `HEAD:${ref}`], {
+      cwd: manifest.generation, env: environment(), timeout: 120000 });
+    const imported = (await exec('git', ['rev-parse', ref], { cwd: manifest.generation, env: environment() })).stdout.trim();
+    if (imported !== fixture.baselineCommit) throw new Error(`Native commit fixture mismatch: ${scenario.id}`);
+    // Rehearse a populated, single-commit native snapshot, not an empty folder.
     const rehearsal = path.join(runDir, 'rehearsal');
     await fs.mkdir(rehearsal);
+    const archive = path.join(runDir, 'native-baseline.tar');
+    await exec('git', ['archive', '--format=tar', `--output=${archive}`, ref], {
+      cwd: manifest.generation, env: environment(), timeout: 120000 });
+    await exec('tar', ['-xf', archive, '-C', rehearsal], { env: environment() });
+    for (const command of [
+      ['init', '--quiet', '--initial-branch=main', '--object-format=sha1', '--template=', '.'],
+      ['add', '--all'],
+      ['-c', 'user.name=Native Fixture', '-c', 'user.email=native@example.invalid', '-c', 'core.hooksPath=/dev/null',
+        'commit', '--quiet', '--no-gpg-sign', '-m', 'Native fixture snapshot'],
+    ]) await exec('git', command, { cwd: rehearsal, env: environment(), timeout: 120000 });
     await fs.cp(resources, path.join(rehearsal, 'resources'), { recursive: true });
     await fs.cp(toolchainDirectory, path.join(rehearsal, '.eval-toolchain'), {
       recursive: true, mode: require('node:fs').constants.COPYFILE_FICLONE });
@@ -83,7 +102,7 @@ async function prepare(manifest, { toolchain = provisionToolchain } = {}) {
     await fs.writeFile(path.join(runDir, 'setup.log'), result.stdout + result.stderr);
     const actual = (await exec('git', ['rev-parse', 'HEAD'], { cwd: rehearsal, env: environment() })).stdout.trim();
     if (actual !== fixture.baselineCommit) throw new Error(`Tessl setup baseline mismatch: ${scenario.id}`);
-    evidence.push({ id: scenario.id, runDir, rehearsal, runtimeRoot, baselineCommit: actual,
+    evidence.push({ id: scenario.id, runDir, rehearsal, runtimeRoot, baselineCommit: actual, nativeFixture: { ref, revision: imported },
       repository: fixture.repository, environment: fixture.environment });
   }
   await writeJson(path.join(manifest.generation, 'preparation.json'), evidence);

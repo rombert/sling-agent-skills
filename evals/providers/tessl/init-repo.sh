@@ -9,24 +9,25 @@ PATH="$EVAL_RUNTIME_ROOT/bin:$EVAL_RUNTIME_ROOT/jdk-21/bin:$PATH"
 export EVAL_RUNTIME_ROOT JAVA_HOME PATH
 
 # Only runs in the disposable evaluation sandbox, never in the source checkout.
-# No URL-based commit fixture: Tessl packs those from the current repository,
-# not from the external Sling repository named by repoUrl.
+# The native commit fixture supplies the prepared tree and scorer metadata;
+# the bundle restores original source history instead of the synthetic snapshot.
 test ! -e "${EVAL_RUNTIME_ROOT:?runtime environment is required}/fixture/installed-baseline.txt" || { echo 'Refusing to overwrite an already prepared sandbox Git repository' >&2; exit 1; }
 bundle=$(realpath resources/source.bundle)
 baseline=$(cat resources/baseline.txt)
 test "${#baseline}" = 40
 case "$baseline" in *[!0-9a-f]*) echo 'Invalid baseline SHA' >&2; exit 1;; esac
-# Some sandbox images initialize a root repository before setup. Preserve its
-# metadata rather than deleting it or depending on that platform-generated SHA.
-# This is confined to the bundle-bearing sandbox root; a .git pointer or symlink
-# could name another checkout and is not safe to move.
+# Native commit fixtures already have a populated repository. Keep its index
+# and object store: moving .git leaves the source files untracked, causing the
+# subsequent checkout to refuse to overwrite them. Import the original history
+# into that repository instead of depending on its platform-generated SHA.
 if [ -e .git ]; then
     test -d .git && test ! -L .git
     test "$(git rev-parse --show-toplevel)" = "$(pwd -P)"
-    test ! -e resources/platform-git
-    mv .git resources/platform-git
+    test -z "$(git status --porcelain --untracked-files=no)"
+    git rev-parse --verify HEAD > resources/native-baseline.txt 2>/dev/null || :
+else
+    git init --quiet --initial-branch=main --object-format=sha1 --template= .
 fi
-git init --quiet --initial-branch=main --object-format=sha1 --template= .
 git config core.hooksPath /dev/null
 git config core.autocrlf false
 git config commit.gpgSign false

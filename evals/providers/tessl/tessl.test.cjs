@@ -35,7 +35,10 @@ test('Tessl generation uses every shared prompt, pin, check and criterion withou
     assert.deepEqual(config.include, ['./resources']);
     assert.deepEqual(config.setup, ['./init-repo.sh']);
     assert.ok((await fs.stat(path.join(native, 'init-repo.sh'))).mode & 0o111);
-    assert.deepEqual(config.fixtures, { java21: { type: 'directory', path: '../../toolchain', installPath: '.eval-toolchain' } });
+    assert.deepEqual(config.fixtures, {
+      codebase: { type: 'commit', repoUrl: scenario.repository.url, ref: `refs/eval-fixtures/${scenario.id}`, installPath: '.' },
+      java21: { type: 'directory', path: '../../toolchain', installPath: '.eval-toolchain' },
+    });
     await assert.rejects(fs.access(path.join(native, 'resources', 'source.bundle')), { code: 'ENOENT' });
   }
   assert.deepEqual(manifest.variants.map((item) => item.label), ['with-skills', 'without-skills']);
@@ -196,6 +199,8 @@ test('Tessl fixture packaging rehearses real bundle/include/setup semantics with
   for (const item of [first, second]) t.after(() => fs.rm(item.runDir, { recursive: true, force: true }));
   assert.equal(first.baselineCommit, second.baselineCommit);
   assert.notEqual(first.baselineCommit, revision);
+  assert.equal(first.nativeFixture.revision, first.baselineCommit);
+  assert.equal(await git(['rev-parse', first.nativeFixture.ref], manifest.generation), first.baselineCommit);
   assert.equal(await git(['rev-parse', 'HEAD'], first.rehearsal), first.baselineCommit);
   assert.equal(await fs.readFile(path.join(first.rehearsal, 'prepared.txt'), 'utf8'), 'fixture setup\n');
   assert.equal(await git(['status', '--porcelain'], first.rehearsal), '');
@@ -213,7 +218,27 @@ test('Tessl fixture packaging rehearses real bundle/include/setup semantics with
   const platformRuntime = path.join(root, 'platform-runtime');
   await exec('sh', [native], { cwd: platform, env: { ...process.env, EVAL_RUNTIME_ROOT: platformRuntime } });
   assert.equal(await git(['rev-parse', 'HEAD'], platform), first.baselineCommit);
-  assert.ok((await fs.stat(path.join(platformRuntime, 'fixture/platform-git'))).isDirectory());
+  assert.ok((await fs.stat(path.join(platform, '.git'))).isDirectory());
+  // A native commit fixture has tracked source files and a synthetic commit,
+  // unlike the empty platform repository above. Moving its .git would make the
+  // checkout fail with "untracked working tree files would be overwritten".
+  const populated = path.join(root, 'populated-sandbox');
+  await fs.mkdir(populated);
+  await fs.writeFile(path.join(populated, '.gitignore'), '.tokensave/\n');
+  await fs.writeFile(path.join(populated, 'pom.xml'), await fs.readFile(path.join(source, 'pom.xml')));
+  await fs.writeFile(path.join(populated, 'prepared.txt'), 'fixture setup\n');
+  await git(['init', '--quiet'], populated);
+  await git(['add', '.'], populated);
+  await git(['-c', 'user.name=Native Fixture', '-c', 'user.email=native@example.invalid', '-c', 'core.hooksPath=/dev/null',
+    'commit', '--quiet', '--no-gpg-sign', '-m', 'Native fixture snapshot'], populated);
+  const nativeHead = await git(['rev-parse', 'HEAD'], populated);
+  await fs.cp(path.join(manifest.source, scenario.id, 'resources'), path.join(populated, 'resources'), { recursive: true });
+  const populatedRuntime = path.join(root, 'populated-runtime');
+  await exec('sh', [native], { cwd: populated, env: { ...process.env, EVAL_RUNTIME_ROOT: populatedRuntime } });
+  assert.equal(await git(['rev-parse', 'HEAD'], populated), first.baselineCommit);
+  assert.equal(await git(['status', '--porcelain'], populated), '');
+  assert.equal(await git(['cat-file', '-t', nativeHead], populated), 'commit');
+  assert.equal((await fs.readFile(path.join(populatedRuntime, 'fixture/native-baseline.txt'), 'utf8')).trim(), nativeHead);
 });
 
 test('Tessl secrets never enter repository/build child environments', () => {

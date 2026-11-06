@@ -9,6 +9,7 @@ const exec = promisify(execFile);
 
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const writeJson = (file, value) => fs.writeFile(file, JSON.stringify(value, null, 2) + '\n');
+const fixtureRef = (scenario) => `refs/eval-fixtures/${scenario.id}`;
 
 function rubric(scenario) {
   return {
@@ -84,7 +85,10 @@ async function generate({ scenarios, arm, output }) {
     await fs.writeFile(path.join(dir, 'task.md'), scenario.prompt);
     await writeJson(path.join(dir, 'criteria.json'), rubric(scenario));
     await writeJson(path.join(dir, 'scenario.json'), { description: scenario.description,
-      fixtures: { java21: { type: 'directory', path: '../../toolchain', installPath: '.eval-toolchain' } },
+      fixtures: {
+        codebase: { type: 'commit', repoUrl: scenario.repository.url, ref: fixtureRef(scenario), installPath: '.' },
+        java21: { type: 'directory', path: '../../toolchain', installPath: '.eval-toolchain' },
+      },
       include: ['./resources'], setup: ['./init-repo.sh'] });
     await fs.copyFile(path.join(__dirname, 'init-repo.sh'), path.join(dir, 'init-repo.sh'));
     await fs.chmod(path.join(dir, 'init-repo.sh'), 0o755);
@@ -115,4 +119,4 @@ async function generate({ scenarios, arm, output }) {
   return { output, manifest };
 }
 
-module.exports = { generate, rubric, digest, writeJson };
+module.exports = { generate, rubric, digest, writeJson, fixtureRef };
