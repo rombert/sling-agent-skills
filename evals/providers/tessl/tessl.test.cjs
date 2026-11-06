@@ -9,7 +9,7 @@ const { settings } = require('../../options.cjs');
 const { load, projectRoot } = require('../../shared/scenarios.cjs');
 const { generate, rubric, digest } = require('./generate.cjs');
 const { run, plan, args, completed, launch } = require('./run.cjs');
-const { prepare, environment } = require('./prepare.cjs');
+const { prepare, environment, rehearsalInputs } = require('./prepare.cjs');
 const { importSnapshot } = require('./verify.cjs');
 const exec = promisify(execFile);
 
@@ -191,7 +191,10 @@ test('Tessl fixture packaging rehearses real bundle/include/setup semantics with
   const { manifest } = await generate({ scenarios: [scenario], arm: 'with-skills', output: path.join(root, 'generated') });
   const toolchain = async () => {
     const dir = path.join(manifest.generation, 'toolchain');
-    await fs.writeFile(path.join(dir, 'jdk.tar.gz'), 'Not needed on the preinstalled-Java-21 test path');
+    const sdk = 'Not needed on the preinstalled-Java-21 test path';
+    manifest.toolchain = { ...manifest.toolchain, sha256: digest(sdk), archive: 'fake-jdk-test.tar.gz' };
+    await fs.writeFile(path.join(dir, 'jdk.tar.gz'), sdk);
+    await fs.writeFile(path.join(dir, 'sha256.txt'), manifest.toolchain.sha256 + '\n');
     return dir;
   };
   const first = (await prepare(manifest, { toolchain }))[0];
@@ -201,6 +204,12 @@ test('Tessl fixture packaging rehearses real bundle/include/setup semantics with
   assert.notEqual(first.baselineCommit, revision);
   assert.equal(first.nativeFixture.revision, first.baselineCommit);
   assert.equal(await git(['rev-parse', first.nativeFixture.ref], manifest.generation), first.baselineCommit);
+  assert.equal(first.sharedInputs.jdkBlob, second.sharedInputs.jdkBlob);
+  const blobPath = path.join(first.sharedInputs.jdkBlob.slice(0, 2), first.sharedInputs.jdkBlob.slice(2));
+  assert.ok((await fs.stat(path.join(first.sharedInputs.objectDirectory, blobPath))).isFile());
+  await assert.rejects(fs.access(path.join(first.rehearsal, '.git/objects', blobPath)), { code: 'ENOENT' });
+  assert.equal((await fs.readFile(path.join(first.rehearsal, '.git/objects/info/alternates'), 'utf8')).trim(), first.sharedInputs.objectDirectory);
+  assert.equal(await git(['cat-file', '-t', first.sharedInputs.jdkBlob], first.rehearsal), 'blob');
   assert.equal(await git(['rev-parse', 'HEAD'], first.rehearsal), first.baselineCommit);
   assert.equal(await fs.readFile(path.join(first.rehearsal, 'prepared.txt'), 'utf8'), 'fixture setup\n');
   assert.equal(await git(['status', '--porcelain'], first.rehearsal), '');
@@ -266,6 +275,13 @@ test('Tessl secrets never enter repository/build child environments', () => {
   assert.deepEqual(environment({ PATH: '/bin', JAVA_HOME: '/jdk21', TESSL_TOKEN: 'secret', TESSL_ORG: 'private',
     LITELLM_API_KEY: 'secret', GIT_DIR: '/other', MAVEN_REPOSITORY_TOKEN: 'maven' }), {
     PATH: '/bin', JAVA_HOME: '/jdk21', MAVEN_REPOSITORY_TOKEN: 'maven' });
+});
+
+test('shared rehearsal storage refuses SDK bytes that differ from the frozen pin', async (t) => {
+  const { manifest } = await fixture(t);
+  await fs.writeFile(path.join(manifest.generation, 'toolchain/jdk.tar.gz'), 'Changed SDK input');
+  await assert.rejects(rehearsalInputs(manifest, path.join(manifest.generation, 'toolchain')), /differs from the frozen toolchain pin/);
+  await assert.rejects(exec('git', ['rev-parse', '--verify', 'refs/eval-inputs/java21'], { cwd: manifest.generation }));
 });
 
 test('independent verification imports full snapshots including deletions, not downloaded Git or stale outputs', async (t) => {

@@ -58,10 +58,29 @@ async function provisionToolchain(manifest) {
   return directory;
 }
 
+async function rehearsalInputs(manifest, directory) {
+  const source = path.join(directory, 'jdk.tar.gz');
+  if (await fileDigest(source) !== manifest.toolchain.sha256) throw new Error('Rehearsal SDK differs from the frozen toolchain pin');
+  let archive = source;
+  const cached = path.join(os.tmpdir(), 'opencode', 'tessl-toolchains', manifest.toolchain.archive);
+  try {
+    if (await fileDigest(cached) !== manifest.toolchain.sha256) throw new Error('Cached rehearsal SDK checksum mismatch');
+    archive = cached;
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  // Store the immutable SDK blob once per generation, outside the temporary
+  // rehearsal filesystem. Alternates keep every synthetic snapshot complete
+  // without writing the same 200-MB blob into each disposable Git repository.
+  const options = { cwd: manifest.generation, env: environment(), timeout: 120000 };
+  const jdkBlob = (await exec('git', ['hash-object', '-w', source], options)).stdout.trim();
+  await exec('git', ['-c', 'core.hooksPath=/dev/null', 'update-ref', 'refs/eval-inputs/java21', jdkBlob], options);
+  return { archive, jdkBlob, objectDirectory: path.join(manifest.generation, '.git/objects') };
+}
+
 async function prepare(manifest, { toolchain = provisionToolchain } = {}) {
   const temp = path.join(os.tmpdir(), 'opencode');
   await fs.mkdir(temp, { recursive: true });
   const toolchainDirectory = await toolchain(manifest);
+  const sharedInputs = await rehearsalInputs(manifest, toolchainDirectory);
   const evidence = [];
   for (const scenario of manifest.scenarios) {
     const runDir = await fs.mkdtemp(path.join(temp, 'sling-tessl-fixture-'));
@@ -91,9 +110,19 @@ async function prepare(manifest, { toolchain = provisionToolchain } = {}) {
     // the codebase before setup; they are tracked in the synthetic commit too.
     await fs.cp(resources, path.join(rehearsal, 'resources'), { recursive: true });
     await fs.cp(toolchainDirectory, path.join(rehearsal, '.eval-toolchain'), {
-      recursive: true, mode: require('node:fs').constants.COPYFILE_FICLONE });
+      recursive: true, mode: require('node:fs').constants.COPYFILE_FICLONE,
+      filter: (file) => file !== path.join(toolchainDirectory, 'jdk.tar.gz') });
+    const sdkInput = path.join(rehearsal, '.eval-toolchain/jdk.tar.gz');
+    try { await fs.link(sharedInputs.archive, sdkInput); }
+    catch (error) {
+      if (!['EXDEV', 'EPERM', 'EOPNOTSUPP', 'ENOTSUP'].includes(error.code)) throw error;
+      await fs.copyFile(sharedInputs.archive, sdkInput, require('node:fs').constants.COPYFILE_FICLONE);
+    }
+    await exec('git', ['init', '--quiet', '--initial-branch=main', '--object-format=sha1', '--template=', '.'], {
+      cwd: rehearsal, env: environment(), timeout: 120000 });
+    await fs.mkdir(path.join(rehearsal, '.git/objects/info'), { recursive: true });
+    await fs.writeFile(path.join(rehearsal, '.git/objects/info/alternates'), sharedInputs.objectDirectory + '\n');
     for (const command of [
-      ['init', '--quiet', '--initial-branch=main', '--object-format=sha1', '--template=', '.'],
       ['add', '--all'],
       ['-c', 'user.name=Native Fixture', '-c', 'user.email=native@example.invalid', '-c', 'core.hooksPath=/dev/null',
         'commit', '--quiet', '--no-gpg-sign', '-m', 'Native fixture snapshot'],
@@ -104,14 +133,14 @@ async function prepare(manifest, { toolchain = provisionToolchain } = {}) {
     await fs.writeFile(path.join(runDir, 'setup.log'), result.stdout + result.stderr);
     const actual = (await exec('git', ['rev-parse', 'HEAD'], { cwd: rehearsal, env: environment() })).stdout.trim();
     if (actual !== fixture.baselineCommit) throw new Error(`Tessl setup baseline mismatch: ${scenario.id}`);
-    evidence.push({ id: scenario.id, runDir, rehearsal, runtimeRoot, baselineCommit: actual, nativeFixture: { ref, revision: imported },
+    evidence.push({ id: scenario.id, runDir, rehearsal, runtimeRoot, baselineCommit: actual, nativeFixture: { ref, revision: imported }, sharedInputs,
       repository: fixture.repository, environment: fixture.environment });
   }
   await writeJson(path.join(manifest.generation, 'preparation.json'), evidence);
   return evidence;
 }
 
-module.exports = { prepare, environment, verifyPackedContext, provisionToolchain, fileDigest };
+module.exports = { prepare, environment, verifyPackedContext, provisionToolchain, fileDigest, rehearsalInputs };
 
 if (require.main === module) Promise.resolve().then(async () => {
   const { settings } = require('../../options.cjs');

@@ -128,6 +128,15 @@ There is no sandbox download, apt invocation, sudo requirement or system-directo
 write. Maven and JDK tools inherit the generated runtime environment; setup
 asserts that both `java` and `mvn` actually run on Java 21.
 
+Local rehearsals share only verified immutable SDK data: the archive is linked
+from its checksum-pinned cache where supported (copied on other filesystems),
+and one SDK Git blob is retained in the generation under `refs/eval-inputs/java21`.
+Disposable rehearsal repositories read that blob through Git alternates instead
+of storing a separate 200-MB copy each. The complete native snapshot is still
+rehearsed, including tracked SDK inputs. Source checkouts and independent
+verification clones remain isolated; native uploads and sandbox setup are
+unchanged. Retain the generation while retaining its rehearsal repositories.
+
 Setup retains known harness inputs under the ignored, hidden
 `.eval-toolchain/runtime/` directory, inside the writable solution. These inputs
 do not contaminate RAT/legal-file checks and are excluded from snapshot import.

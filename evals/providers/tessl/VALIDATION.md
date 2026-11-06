@@ -137,6 +137,22 @@ policies. See the updated calibration recipe and the retained
 `native-context-reference-recheck.json` under generation
 `6861ffab-aa40-41c9-aed0-f0245def1abd`.
 
+### Full-batch local preflight storage fix
+
+The first ten-solve batch command stopped in local rehearsal `git add --all`
+with a disk-quota error, **before** the submission ledger and paid native eval
+call. It incurred no new solve charge and was not a remote retry. Repeated local
+snapshots had duplicated the 200-MB SDK both as archive files and Git blobs.
+
+Rehearsals now link the checksum-verified immutable SDK archive where supported
+and share one SDK blob in the retained generation's Git object store. Tests and
+the real five-project preflight confirmed the complete snapshots can read that
+blob without writing duplicate per-rehearsal SDK objects. Existing verified
+duplicate archives were atomically coalesced without changing their bytes or
+paths; source, results and logs were retained. No native fixture or task changed.
+Generation `6514ef39-3f5e-40be-be31-d6a8ee650f3c` passed the corrected five-project
+local preflight and is prepared for the ten-solve, both-arm native batch.
+
 Actual hosted diagnostic logs confirm:
 
 - Setup executes through POSIX `sh`, as `uid=1001(agent)` on Ubuntu 26.04.
