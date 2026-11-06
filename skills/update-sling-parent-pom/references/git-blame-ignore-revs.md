@@ -6,15 +6,15 @@ Per the [Update to Parent 60](https://cwiki.apache.org/confluence/spaces/SLING/p
 
 ## Preferred: commit formatting separately
 
-If you control the commit sequence, run `mvn spotless:apply` and commit the resulting reformat **on its own**, separate from the parent-version/dependency changes. This makes the next step trivial and keeps the substantive diff reviewable on its own.
+Run `mvn spotless:apply` and commit the resulting reformat **on its own**, after the parent-version/dependency changes commit (see the main instructions' "Committing the changes" section). This makes the next step trivial and keeps the substantive diff reviewable on its own.
 
 ## Either way: add the commit(s) to `.git-blame-ignore-revs`
 
-Create (or append to) a `.git-blame-ignore-revs` file at the repo root listing the full commit SHA(s) that contain reformatting, one per line, with a comment above each explaining why:
+Create (or append to) a `.git-blame-ignore-revs` file at the repo root listing the full commit SHA(s) that contain reformatting, one per line, with a comment above each explaining why, and commit it as a separate commit:
 
 ```
-# SLING-NNNNN: sling-bundle-parent NN -> MM upgrade; includes the resulting
-# mvn spotless:apply reformat of every source file.
+# SLING-NNNNN: mvn spotless:apply reformat after the sling-bundle-parent
+# NN -> MM upgrade.
 <full-commit-sha>
 ```
 
