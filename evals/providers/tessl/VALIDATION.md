@@ -1,17 +1,16 @@
 # Validation record — 2026-11-06
 
-## Outcome: combined setup failure reproduced and fixed; migration validation in progress
+## Outcome: first real migration independently verified; full catalog validation next
 
-The provider, native conversion and five-project catalog are implemented and
-locally verified. Hosted setup and a coding-agent attempt completed, but that
-run's native scorer lacked a commit-fixture baseline. A minimal native commit
-fixture control subsequently completed both solving and scoring with **1/1**.
-The adapter now supplies native prepared-baseline refs and preserves their Git
-metadata. A full setup trace then exposed native snapshot tracking of harness
-inputs; the index-only restoration fix passed a reference build with actual native
-skill context. A new scored standalone migration is in progress. Full catalog/
-both-arm parity is not yet demonstrated. Native scores and independent executable checks are
-always separate evidence, not interchangeable grading systems.
+The standalone skills-arm migration completed hosted setup, solving, scoring,
+automatic download and independent executable verification. Parent 52, Java 8
+main/test targets, all six tests and required bundle metadata passed. The native
+judge scored **9/10**; the sole missing point was transcript-based skill evidence,
+while native activation metadata separately confirmed successful skill-tool use.
+New generations enforce activation through a mandatory metadata audit instead
+of an unsupported judge item. Historical scores remain unchanged. Full catalog/
+both-arm validation is next, not yet demonstrated; scores, executable checks and
+activation audits are distinct evidence.
 
 ## Troubleshooting and credit record
 
@@ -29,10 +28,11 @@ not platform quotes. No automatic adapter retries or rescoring were used.
 | `01a1b1e1-3625-71dd-be86-efb852d4a8e1` | Native commit fixture, no custom setup | Solve and scoring completed; diagnostic 1/1; solution downloaded | 10.5185626 |
 | `01a1b1e5-80b0-7395-9ef9-0999083ed08e` | Migration with native fixture and preserved Git metadata | Setup failed before model; final attempt could not read resources/baseline.txt | 10 |
 | `01a1b1e8-a1ca-76a7-a948-fc94fd135920` | Combined native fixture/SDK/context trace | Completed; diagnostic 1/1; exposed checkout deletion of harness payload | 10.9268194 |
+| `01a1b1f1-7247-71ce-9c6f-4fd3f21cf209` | Real standalone migration, skills arm | Native 9/10; independent checks PASS; native skill-tool activation confirmed | 13.0291564 |
 
 Confirmed subtotal before the corrected scored run: **82.5383888 credits**.
 Local CLI validation rejections created no remote run and are not extra charges.
-Finalized charges across the table are **123.9837708 credits**, excluding the
+Finalized charges across the table are **137.0129272 credits**, excluding the
 nonterminal migration runs. Diagnostic scores are not calibrated migration passes.
 
 ### Corrected standalone run: scorer integration failure
@@ -106,6 +106,36 @@ that source mismatches fail without overwriting files. The rootless full referen
 build additionally passed with the **actual native installed context archive**,
 retaining skill links and metadata without weakening Maven checks. The corrected
 standalone generation is `c39e85ce-20ac-4b30-8ff3-0374059ea0e5`.
+
+### First real migration and activation evidence
+
+Run `01a1b1f1-7247-71ce-9c6f-4fd3f21cf209` completed the entire pipeline. Its
+retained `verification-report.json` has complete one-slot coverage, all shared
+checks passing, and effective main/test targets preserved at 8. The only native
+zero was `skill_usage`: the judge explicitly reported that its inputs lacked the
+coding transcript. Meanwhile `solution.activation` contains
+`activatedSkills: ["tessl__update-sling-parent-pom"]` and a matching
+`activationMethods` entry with `via: "skill-tool"`.
+
+This is an evidence-routing problem, not an unsuccessful migration or absent
+activation. Future native rubrics omit that unobservable item, while the adapter
+requires structured activation metadata separately (and forbids project skill
+activation in the no-skills arm). Collection uses checksum-verified frozen
+rubrics, so rereading an old run still reports its original 9/10 rather than
+silently converting it to 9/9. No paid rescoring was performed. The legacy report
+still correctly exits nonzero under its original full-native-score policy.
+
+All five reference migrations also passed full builds and exact artifact checks
+with the actual native context installed. The initial entirely offline,
+read-only-cache container matrix passed standalone/packageinit but exposed cache
+limitations for JCR/discovery and a missing explicit healthcheck timestamp on
+Maven 3.9. Rechecks used isolated writable HOME/Maven caches and allowed the
+catalog's declared network access; healthcheck received a normal POM
+`project.build.outputTimestamp` based on its pinned source commit. All five then
+passed without changing targets, test totals, metadata expectations or check
+policies. See the updated calibration recipe and the retained
+`native-context-reference-recheck.json` under generation
+`6861ffab-aa40-41c9-aed0-f0245def1abd`.
 
 Actual hosted diagnostic logs confirm:
 

@@ -169,12 +169,15 @@ The run record includes CLI version, exact arguments, solve count and generation
 Completed runs additionally retain the native view, credit usage, each downloaded
 solution, and `verification-report.json`. The adapter independently rebuilds each
 solution through the shared checks, preserving original bytecode and exact test
-expectations. Native scores and executable outcomes remain separate report fields.
+expectations. Native scores, executable outcomes and metadata-based activation
+audits remain separate report fields.
 The run exits nonzero for missing/partial native assessments, any failed shared
-check, incomplete coverage, or result-collection errors; a completed job alone
-does not imply a passing evaluation. Collection errors can be fixed and re-run
-locally without submitting another solve or judge.
+check, missing/failed activation evidence, incomplete coverage, or collection
+errors; a completed job alone does not imply a passing evaluation. Collection
+errors can be fixed and re-run locally without submitting another solve or judge.
 Each generation retains its own `manifest.json` as well as the latest pointer.
+Collection verifies and uses that generation's frozen `criteria.json`, not the
+current generator's rubric. Later rubric changes cannot reinterpret old scores.
 
 ## Parity and limitations
 
@@ -187,7 +190,7 @@ Each generation retains its own `manifest.json` as well as the latest pointer.
 | Coding model / harness | Qwen via Pi | DeepSeek V4.1 Flash via Claude harness |
 | Native scoring | Executable assertions plus qualitative judge | Weighted checklist judge |
 | Independent artifact checks | Shared checks in edited workspace | Same checks after downloading each solution |
-| Skill activation | Required successful read metadata | Transcript-based rubric; native activation reporting where available |
+| Skill activation | Required successful read metadata | Mandatory native activation/read-or-skill-tool metadata audit |
 | Retries | Disabled | No adapter retry or force flags; local duplicate ledger |
 
 Tessl's supported model list does not include Promptfoo's `qwen3.8-27b`, and
@@ -205,10 +208,20 @@ or native agent instructions. Pi's ambient-skill isolation is not a claimed
 guarantee of Tessl's hosted harness.
 
 Each shared executable check becomes one native checklist item. Additional
-items cover inherited main/test Java targets, skill usage and every shared
+items cover inherited main/test Java targets and every shared
 qualitative criterion, all equally weighted. **These are judge scores, not
 independent executable passes.** The rubric demands evidence and does not let a
 successful summary substitute for a build.
+
+Skill activation is mandatory but **not a native judge item** in new generations.
+The hosted scorer did not receive the coding transcript in the validated run;
+its old `skill_usage` item therefore scored zero despite native metadata recording
+successful `tessl__update-sling-parent-pom` activation via `skill-tool`. That
+historical **9/10** score remains unchanged. The collector now independently
+requires the relevant skill in `activatedSkills` with a `read` or `skill-tool`
+activation method. The no-skills arm requires explicit activation evidence with
+no project skill activated. Missing evidence fails closed; neither a successful
+build nor a high judge score substitutes for activation.
 
 The adapter collects completed-run solutions automatically. These read-only
 commands are also available for manual inspection or verification:
@@ -232,7 +245,9 @@ solution into a separate disposable clone, independently checks inherited
 compiler targets, rebuilds and checks exact artifacts/tests. It never trusts a
 downloaded `.git` or stale `target/`. Missing tracked files count as deletions;
 patch-only downloads are not full snapshots. Symlinks are refused. Its
-`verification.json` explicitly has `nativeScore: null`: completion, activation
-and git-action hygiene still require the native result and transcript.
+`verification.json` explicitly has `nativeScore: null`. Completion and activation
+use separate native records. Git-action hygiene remains a native qualitative
+assessment whose evidence can be limited when the coding transcript is absent;
+do not claim identical action-level observability to Pi's retained tool events.
 A single repetition validates integration only; it does not establish skill
 effect size, reliability, or a with/without comparison when only one arm ran.

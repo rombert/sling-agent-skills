@@ -4,9 +4,9 @@ Real-repository scenarios live in [`scenarios.yaml`](scenarios.yaml). The top-le
 Makefile selects a provider adapter to generate its native configuration and run
 evaluations. Promptfoo, Tessl and Inspect have adapters.
 
-**Tessl hosted validation:** setup and a coding-agent attempt completed, but the
-native scorer is blocked before judging (`compute-diff` cannot find Git metadata).
-Full catalog/both-arm parity is not yet demonstrated. See the
+**Tessl hosted validation:** the first real migration completed native scoring
+and passed independent executable checks; native metadata confirmed skill use.
+Full catalog/both-arm validation is next, not yet demonstrated. See the
 [validation record](providers/tessl/VALIDATION.md) for demonstrated scope,
 remaining limitations and actual credit usage.
 
