@@ -1,14 +1,15 @@
 # Validation record — 2026-11-06
 
-## Outcome: native commit-fixture scoring validated; migration validation in progress
+## Outcome: native commit-fixture scoring validated; combined setup still blocked
 
 The provider, native conversion and five-project catalog are implemented and
 locally verified. Hosted setup and a coding-agent attempt completed, but that
 run's native scorer lacked a commit-fixture baseline. A minimal native commit
 fixture control subsequently completed both solving and scoring with **1/1**.
 The adapter now supplies native prepared-baseline refs and preserves their Git
-metadata; a new scored migration is in progress. Full catalog/both-arm parity
-is not yet demonstrated. Native scores and independent executable checks are
+metadata. The subsequent migration attempt still failed setup, so a first-attempt
+trace of the complete fixture/toolchain/context combination is being collected.
+Full catalog/both-arm parity is not yet demonstrated. Native scores and independent executable checks are
 always separate evidence, not interchangeable grading systems.
 
 ## Troubleshooting and credit record
@@ -25,10 +26,11 @@ not platform quotes. No automatic adapter retries or rescoring were used.
 | `01a1b163-447f-7787-a081-22374d3a711e` | Unscored rootless diagnostic | Completed; exposed cached Java path | 11.946124 |
 | `01a1b1df-7317-708b-8417-f63c10cdaa81` | Native commit fixture with existing custom setup | Setup failed before model; local reproduction below | 10 |
 | `01a1b1e1-3625-71dd-be86-efb852d4a8e1` | Native commit fixture, no custom setup | Solve and scoring completed; diagnostic 1/1; solution downloaded | 10.5185626 |
+| `01a1b1e5-80b0-7395-9ef9-0999083ed08e` | Migration with native fixture and preserved Git metadata | Setup failed before model; final attempt could not read resources/baseline.txt | 10 |
 
 Confirmed subtotal before the corrected scored run: **82.5383888 credits**.
 Local CLI validation rejections created no remote run and are not extra charges.
-Finalized charges across the table are **103.0569514 credits**, excluding the
+Finalized charges across the table are **113.0569514 credits**, excluding the
 nonterminal migration runs. Diagnostic scores are not calibrated migration passes.
 
 ### Corrected standalone run: scorer integration failure
@@ -82,6 +84,13 @@ baseline identity, populated native repository handling and retained native SHA.
 All 14 Tessl tests pass (one opt-in skipped), and the rootless container/reference
 build passed separately against a populated fixture. The new scored standalone
 generation is `3e99b1f6-2fc0-4d95-a34c-3bd4f5defbe9`.
+That migration failed setup before any model tokens were used. Its final
+reported stderr includes `cat: resources/baseline.txt: No such file or directory`.
+Because native setup retries can change the sandbox between attempts, this alone
+does not identify the first failing command. A separate diagnostic now captures
+the initial file layout and a single traced setup attempt with all native Git,
+SDK, include and skill-context inputs present; it returns success only to retain
+the diagnostic logs and is never used as calibrated production setup.
 
 Actual hosted diagnostic logs confirm:
 
