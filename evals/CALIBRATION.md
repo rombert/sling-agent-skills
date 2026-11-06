@@ -20,6 +20,11 @@ takes precedence over the inherited legacy source/target properties. Do not
 mistake the healthcheck POM's inherited `maven.compiler.target=1.7` for its actual
 Java target: its compiler execution explicitly uses `release=8`.
 
+Later rootless checks use Maven 3.9 (the hosted runner uses 3.9.12). Do not assume
+that the initial Maven 3.10 result makes every reference POM portable unchanged:
+healthcheck requires an explicit reproducible-build timestamp on Maven 3.9, as
+described below. Runtime differences do not change bytecode or test expectations.
+
 ## Reproducible reference recipes
 
 Clone each catalog URL, detach at its full catalog SHA, then apply only the
@@ -76,6 +81,13 @@ single annotated production class:
   `org.apache.http.*`, `org.apache.sling.testing.tools.http`, and
   `org.junit.internal.*`, followed by `*`.
 - The old export patterns match no classes; the built bundle has no exports.
+
+For Maven 3.9, also declare `project.build.outputTimestamp` in the POM to satisfy
+the new parent's Enforcer rule. A deterministic value is the pinned source
+commit's timestamp, `2025-08-06T12:20:02Z`. Set this as a normal migration property,
+not an Enforcer skip or a command-line workaround. The initial Maven 3.10
+reference passed without this explicit property; the rootless Maven 3.9 check
+exposed the omission. No expected tests, metadata or compiler targets change.
 
 Do not replace SCR annotations by simply dropping configuration factory or
 metatype behavior. The reference preserves generated DS and metatype descriptors
