@@ -1,38 +1,34 @@
+.DEFAULT_GOAL := help
+PROVIDER ?= promptfoo
+SCENARIO ?= all
 ARM ?= both
 RUNS ?= 1
-
-# Export separately from the shell command so paths are not interpreted as shell syntax.
-ifneq ($(origin REPO),undefined)
-export PROMPTFOO_REPO := $(REPO)
+export EVAL_PROVIDER := $(PROVIDER)
+export SCENARIO ARM RUNS
+ifneq ($(origin EVAL_CONFIG),undefined)
+export EVAL_CONFIG
 endif
 
-ARM_FILTER_with-skills := with-skills$$
-ARM_FILTER_without-skills := without-skills$$
-PROVIDER_FILTER = $(ARM_FILTER_$(ARM))
+.PHONY: help list-evals generate-eval generate-evals run-eval run-evals test-evals view-evals
+help:
+	@echo 'make generate-eval [PROVIDER=promptfoo] [SCENARIO=id|all] [ARM=both|with-skills|without-skills]'
+	@echo 'make run-eval      [same options] [RUNS=1]'
+	@echo 'make test-evals    # Offline tests; no model calls or real Maven builds'
+	@echo 'make list-evals    # Ready scenarios and pinned fixtures awaiting calibration'
 
-run-evals: .env
-ifneq ($(origin BACKEND),undefined)
-	$(error BACKEND has been removed; evaluations use Pi only. Omit BACKEND)
-endif
-ifeq ($(ARM),with-skills)
-else ifeq ($(ARM),without-skills)
-else ifneq ($(ARM),both)
-	$(error ARM must be with-skills, without-skills, or both)
-endif
-ifneq ($(shell printf '%s\n' '$(RUNS)' | grep -Ec '^[1-9][0-9]*$$'),1)
-	$(error RUNS must be a positive integer)
-endif
-ifneq ($(PROVIDER_FILTER),)
-	sops exec-env .env 'npx promptfoo@0.125.1 eval --no-cache --repeat "$(RUNS)" --filter-providers "$(PROVIDER_FILTER)"'
-else
-	sops exec-env .env 'npx promptfoo@0.125.1 eval --no-cache --repeat "$(RUNS)"'
-endif
-.PHONY: run-evals
+list-evals:
+	node evals/shared/scenarios.cjs
+
+generate-eval:
+	node evals/generate.cjs
+generate-evals: generate-eval
+
+run-eval: generate-eval
+	node evals/run.cjs
+run-evals: run-eval
+
+test-evals:
+	npm run test:evals
 
 view-evals:
-	npx promptfoo@0.125.1 view
-.PHONY: view-evals
-
-.env:
-	@echo ".env file is missing"
-	exit 1
+	node evals/view.cjs

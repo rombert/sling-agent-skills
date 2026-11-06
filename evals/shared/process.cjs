@@ -2,7 +2,7 @@ const fs = require('node:fs/promises');
 const { spawn } = require('node:child_process');
 
 // Persist full logs without buffering an entire Maven build in memory.
-async function run(command, args, { cwd, log, timeoutMs = 1200000, signal } = {}) {
+async function run(command, args, { cwd, log, timeoutMs = 1200000, signal, env = process.env } = {}) {
   const handle = await fs.open(log, 'w');
   try {
     return await new Promise((resolve, reject) => {
@@ -10,9 +10,7 @@ async function run(command, args, { cwd, log, timeoutMs = 1200000, signal } = {}
         cwd,
         detached: true,
         stdio: ['ignore', handle.fd, handle.fd],
-        // Maven needs the normal Java/Maven environment, but not the model key.
-        env: Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-          key !== 'LITELLM_API_KEY' && !key.startsWith('GIT_'))),
+        env: childEnvironment(env),
       });
       let timedOut = false;
       const kill = () => {
@@ -52,4 +50,9 @@ async function tail(file, bytes = 12000) {
   }
 }
 
-module.exports = { run, tail };
+// Repository commands must not inherit another checkout's Git context. Provider
+// adapters additionally remove their own model credentials before calling us.
+const childEnvironment = (env = process.env) => Object.fromEntries(
+  Object.entries(env).filter(([key]) => !key.startsWith('GIT_')));
+
+module.exports = { run, tail, childEnvironment };

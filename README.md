@@ -86,3 +86,10 @@ The `sling-release` skill requires:
 Some parent pom updates require changes to the OSGi components descriptors. These can be validated using the [osgi-ds-metatype-diff](https://github.com/jsedding/osgi-ds-metatype-diff) tool. Since there is no release of this tool yet you will need to build it and install it to your local Maven repository. Building using `-DskipTests -DskipITs` is required for recent Java versions.
 
 This dependency is optional but recommended.
+
+## Evaluations
+
+Shared real-repository scenarios live in [`evals/scenarios.yaml`](evals/scenarios.yaml).
+The top-level Makefile generates framework-specific configuration and runs the
+evaluations. See [`evals/README.md`](evals/README.md) for setup and a minimal
+single-scenario smoke run. Promptfoo is supported first; Tessl is deferred.

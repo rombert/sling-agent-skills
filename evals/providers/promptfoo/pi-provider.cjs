@@ -244,12 +244,14 @@ module.exports = class PiProvider {
     return `sling-parent:pi:${this.config.model}:${this.config.install_skills ? 'with' : 'without'}-skills`;
   }
 
-  async callApi(prompt, _context, options = {}) {
+  async callApi(prompt, context, options = {}) {
     let state;
     const tokenUsage = { prompt: 0, completion: 0, total: 0, completionDetails: { reasoning: 0 } };
     try {
       options.abortSignal?.throwIfAborted();
-      state = await prepare(this.config);
+      const scenario = context?.vars?.scenario;
+      state = await prepare(scenario ? { ...this.config, scenario,
+        mavenTimeoutMs: scenario.environment.command_timeout_seconds * 1000 } : this.config);
       if (!process.env.LITELLM_API_KEY) throw new Error('LITELLM_API_KEY is not set');
       const command = this.config.piCommand ?? 'pi';
       const { stdout: version } = await exec(command, ['--version'], { timeout: 10000, signal: options.abortSignal });

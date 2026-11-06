@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+
+description: "Upgrade the Sling parent POM with pi.dev: with skills vs without skills"
+
+# Provider settings only. make generate-eval adds tasks, fixtures and assertions
+# from evals/scenarios.yaml. Run the generated target/evals/promptfoo.json.
+
+providers:
+  - id: file://pi-provider.cjs
+    label: pi-with-skills
+    config: &codingConfig
+      model: qwen3.8-27b # Shared by both skills arms; labels do not select the model.
+      apiBaseUrl: https://llm.apache.org/v1
+      temperature: 0
+      maxTokens: 8192
+      maxRetries: 0 # Disable Promptfoo retries of the entire coding task, including on HTTP 429.
+      # Verified against llm.apache.org for this Qwen model. Revisit when changing models.
+      chatTemplateKwargs:
+        enable_thinking: true
+      contextWindow: 131072 # Verified qwen3.8-27b context for Pi's model metadata.
+      piCompaction:
+        enabled: true
+        reserveTokens: 16384 # Output budget + Pi's 4096-token safety margin + headroom.
+        keepRecentTokens: 20000
+      skills_dir: ./skills
+      install_skills: true
+      maxTurns: 80
+      maxTextOnlyTurns: 3
+      maxToolRepeats: 3
+      mavenTimeoutMs: 1200000
+
+  - id: file://pi-provider.cjs
+    label: pi-without-skills
+    config:
+      <<: *codingConfig
+      install_skills: false
+
+# Serial builds also avoid contention in the shared local Maven repository.
+evaluateOptions:
+  maxConcurrency: 1
+  timeoutMs: 7200000
+
+defaultTest:
+  options:
+    provider:
+      id: litellm:gemma4-26b
+      config:
+        apiBaseUrl: https://llm.apache.org/v1

@@ -1,0 +1,226 @@
+# Shared scenario data, independent of Promptfoo, Tessl, or Inspect.
+# Adapters supply the runtime and map checks/criteria to native framework scoring.
+# Fixture setup and expected results are harness data, not part of the user prompt.
+schema_version: 1
+
+# Existing checkouts are pinned inventory, not yet calibrated agent tasks.
+# Do not invent expected test totals or silently use their moving HEADs.
+fixtures:
+  - id: discovery-standalone
+    repository:
+      url: https://github.com/apache/sling-org-apache-sling-discovery-standalone.git
+      revision: 48c24b4dc5f8ef37018d4421e80cdffd2f2a8e29
+      local_path: repos/org-apache-sling-discovery-standalone
+    initial_parent: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "46"}
+    status: needs_calibration
+    notes: Small bundle; qualify a forward parent upgrade while preserving its inherited Java 8 bytecode target.
+
+  - id: jcr-packageinit
+    repository:
+      url: https://github.com/apache/sling-org-apache-sling-jcr-packageinit.git
+      revision: 988079565c8cf80551f3bb12a0d1a1e781dc677d
+      local_path: repos/org-apache-sling-jcr-packageinit
+    initial_parent: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "52"}
+    status: needs_calibration
+    notes: Explicit Java 8 bytecode target and Mockito 2.21.0; qualify a forward migration and Java 21 test compatibility.
+
+  - id: junit-healthcheck
+    repository:
+      url: https://github.com/apache/sling-org-apache-sling-junit-healthcheck.git
+      revision: 739816308123a4b68de8bd259babe3dcd62e008a
+      local_path: repos/org-apache-sling-junit-healthcheck
+    initial_parent: {group_id: org.apache.sling, artifact_id: sling, version: "43"}
+    status: needs_calibration
+    notes: Candidate parent-43-to-46 migration with legacy SCR and Felix bundle plugin setup; validate baseline and migration first.
+
+  - id: discovery-impl
+    repository:
+      url: https://github.com/apache/sling-org-apache-sling-discovery-impl.git
+      revision: 8743059e9f26b26eb84a06a800071736271db208
+      local_path: repos/sling-org-apache-sling-discovery-impl
+    initial_parent: {group_id: org.apache.sling, artifact_id: sling-bundle-parent, version: "52"}
+    status: needs_calibration
+    notes: Larger test suite with existing slow-test exclusions; establish effective bytecode and exact default test totals before enabling.
+
+scenarios:
+  - id: jcr-js-nodetypes-parent-34-to-46
+    description: Migrate a real Sling bundle to the first Java-21-compatible parent while preserving Java 8 bytecode.
+    skill: update-sling-parent-pom
+
+    repository:
+      url: https://github.com/apache/sling-org-apache-sling-jcr-js-nodetypes.git
+      revision: c2d77bc8755b31d25d39ab0820fbdc87cb0f6147
+      working_directory: .
+
+    environment:
+      java_major: 21
+      required_tools: [git, java, mvn]
+      network: true
+      command_timeout_seconds: 1200
+      # Record actual runtime versions in each evaluation result.
+      validated_runtimes:
+        - {maven: "3.9.16", java: "21.0.12.1"}
+        - {maven: "3.10.0", java: "21.0.13"}
+
+    fixture:
+      initial_parent:
+        group_id: org.apache.sling
+        artifact_id: sling
+        version: "34"
+      initial_java_bytecode_target: 8
+      # Capture the prepared fixture, including setup, as the comparison baseline.
+      baseline: after_setup
+      baseline_build:
+        command: mvn clean verify
+        expected_result: failure
+        reason: Surefire 2.20.1 cannot detect Java 21; compilation still produces Java 8 bytecode.
+      setup:
+        - type: git_apply
+          # The historical POM uses tabs; keep this YAML space-indented.
+          options: [--ignore-whitespace]
+          reason: >-
+            Repair the historical Jasmine runner before the task starts. Its
+            failure is independent of parent selection and should not be scored
+            as parent migration. This configuration passes all 39 JavaScript
+            specs without modifying production JavaScript or test sources.
+          patch: |
+            diff --git a/pom.xml b/pom.xml
+            --- a/pom.xml
+            +++ b/pom.xml
+            @@ -53,7 +53,7 @@
+                             <plugin>
+                                 <groupId>com.github.searls</groupId>
+                                 <artifactId>jasmine-maven-plugin</artifactId>
+            -                    <version>1.3.1.0</version>
+            +                    <version>3.0-beta-02</version>
+                             </plugin>
+                         </plugins>
+                     </pluginManagement>
+            @@ -61,7 +61,7 @@
+                         <plugin>
+                             <groupId>com.github.searls</groupId>
+                             <artifactId>jasmine-maven-plugin</artifactId>
+            -                <version>1.3.1.0</version>
+            +                <version>3.0-beta-02</version>
+                             <executions>
+                                 <execution>
+                                     <goals>
+            @@ -69,8 +69,26 @@
+                                     </goals>
+                                 </execution>
+                             </executions>
+            +                <dependencies>
+            +                    <dependency>
+            +                        <groupId>org.seleniumhq.selenium</groupId>
+            +                        <artifactId>htmlunit-driver</artifactId>
+            +                        <version>2.45.0</version>
+            +                    </dependency>
+            +                </dependencies>
+                             <configuration>
+                                 <specRunnerTemplate>DEFAULT</specRunnerTemplate>
+            +                    <webDriverClassName>org.openqa.selenium.htmlunit.HtmlUnitDriver</webDriverClassName>
+            +                    <webDriverCapabilities>
+            +                        <capability>
+            +                            <name>browserName</name>
+            +                            <value>htmlunit</value>
+            +                        </capability>
+            +                        <capability>
+            +                            <name>javascriptEnabled</name>
+            +                            <value>true</value>
+            +                        </capability>
+            +                    </webDriverCapabilities>
+                                 <jsSrcDir>${project.basedir}/src/main/resources/SLING-INF/libs/jsnodetypes/js</jsSrcDir>
+                             </configuration>
+                         </plugin>
+
+    prompt: |
+      Upgrade this project to org.apache.sling:sling-bundle-parent version 46.
+      Use the available Java 21 and Maven environment and make the necessary
+      migration changes so that mvn clean verify succeeds. Preserve the original
+      Java 8 bytecode target and the bundle's behavior and metadata. Do not skip
+      tests, weaken checks, or override parent-managed plugin versions to hide
+      compatibility failures. Do not stage changes, commit, or push. Summarize
+      your changes and the verification results.
+
+    checks:
+      - id: parent
+        type: pom_parent
+        path: pom.xml
+        expected:
+          group_id: org.apache.sling
+          artifact_id: sling-bundle-parent
+          version: "46"
+
+      - id: maven_verify
+        type: command
+        # Run independently in the edited workspace, not just from the agent log.
+        command: mvn clean verify
+        expected_exit_code: 0
+
+      - id: java_bytecode
+        type: class_major_version
+        # Require nonempty class sets; release takes precedence over legacy target.
+        paths: [target/classes/**/*.class, target/test-classes/**/*.class]
+        expected: 52
+
+      - id: java_tests
+        type: junit_reports
+        paths: [target/surefire-reports/TEST-*.xml]
+        expected: {tests: 29, failures: 0, errors: 0, skipped: 0}
+
+      - id: javascript_tests
+        type: junit_reports
+        paths: [target/jasmine/TEST-jasmine.xml]
+        expected: {tests: 39, failures: 0, errors: 0, skipped: 0}
+
+      - id: bundle_metadata
+        type: jar_manifest
+        path: target/org.apache.sling.jcr.js.nodetypes-0.1.0-SNAPSHOT.jar
+        expected:
+          Bundle-SymbolicName: org.apache.sling.jcr.js.nodetypes
+          export_packages: [org.apache.sling.jcr.js.nodetypes.javascript]
+          initial_content_paths:
+            - /libs/jsnodetypes
+            - /libs/jsnodetypes/documentation
+            - /libs/jsnodetypes/js
+
+    criteria:
+      - id: migration_quality
+        description: |
+          Judge the actual diff against the prepared fixture, not just the final
+          summary. Require a real parent upgrade, migration from the Felix bundle
+          plugin to the bundle parent's Bnd setup, preservation of initial-content
+          directives and exported packages, and a Java-21-compatible Mockito
+          migration. The verified solution uses mockito-core 4.11.0 and replaces
+          the two org.mockito.Matchers.anyInt imports with ArgumentMatchers.anyInt;
+          equivalent compatible solutions are acceptable. Production behavior and
+          existing test assertions must remain unchanged.
+
+      - id: verification_integrity
+        description: |
+          Require full Java 21 verification, with all 29 Java tests and 39
+          JavaScript specs executed. Reject added test/quality-check skip flags,
+          exclusions, removed tests, weakened assertions, JVM --add-opens
+          workarounds, or overrides of parent-managed plugin versions. The
+          historical migration's bnd.baseline.skip=true is acceptable because
+          this 0.1.0-SNAPSHOT module has no released baseline; do not treat it as
+          permission to disable any other check. Parent 46's strict legal-file
+          verification and RAT checks must execute successfully.
+
+      - id: scope_and_git_hygiene
+        description: |
+          Changes should be limited to the POM, Bnd configuration, and necessary
+          Mockito test-source migration. Do not alter the prepared Jasmine runner,
+          production code, JavaScript specs, or unrelated files. Do not stage,
+          commit, push, reset, or rewrite repository history. Evaluate git actions
+          using the agent transcript, separately from harness fixture preparation.
+
+    provenance:
+      parent_boundary:
+        last_failing: "45"
+        first_passing: "46"
+        reason: >-
+          Parents 40–45 inherit ianal-maven-plugin 1.0-alpha-1, whose legal-file
+          verification fails on Java 21's reflection restrictions. Parent 46
+          replaces it with tools-maven-plugin 1.4 while retaining strict checks.
+      reference_revision: e06e10b580f41747a366762083a4e5f34e5cce98

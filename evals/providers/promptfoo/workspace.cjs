@@ -3,15 +3,17 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
-const { readParent } = require('./parent-upgrade.cjs');
+const { readParent } = require('../../shared/parent-upgrade.cjs');
+const { prepareFixture } = require('../../shared/fixture.cjs');
+const { projectRoot } = require('../../shared/scenarios.cjs');
+const { childEnvironment } = require('./environment.cjs');
 
 const exec = promisify(execFile);
-const projectRoot = path.resolve(__dirname, '..');
 
 async function git(cwd, args) {
   const { stdout } = await exec('git', args, {
     cwd, maxBuffer: 20 * 1024 * 1024,
-    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
+    env: childEnvironment(),
   });
   return stdout;
 }
@@ -22,6 +24,20 @@ function isSubdirectory(root, directory) {
 }
 
 async function prepare(config) {
+  if (config.scenario) {
+    if (process.env.PROMPTFOO_REPO !== undefined) throw new Error('PROMPTFOO_REPO cannot override a pinned scenario');
+    const tempRoot = process.env.PROMPTFOO_WORKSPACE_ROOT || path.join(os.tmpdir(), 'opencode');
+    await fs.mkdir(tempRoot, { recursive: true });
+    const runDir = await fs.mkdtemp(path.join(tempRoot, 'sling-skill-eval-'));
+    try {
+      const fixture = await prepareFixture(config.scenario, runDir, { env: childEnvironment() });
+      const skills = await installSkills(config, runDir);
+      return { runDir, ...fixture, skills, config };
+    } catch (error) {
+      error.message += `; fixture artifacts: ${runDir}`;
+      throw error;
+    }
+  }
   const requested = process.env.PROMPTFOO_REPO ?? config.working_dir;
   if (typeof requested !== 'string' || !requested.trim()) {
     throw new Error('working_dir or PROMPTFOO_REPO must name a repository subdirectory of repos');
@@ -53,6 +69,12 @@ async function prepare(config) {
   await git(source, ['clone', '--quiet', '--no-local', '--no-hardlinks', source, workingDir]);
   await git(workingDir, ['checkout', '--quiet', '--detach', baselineCommit]);
   await git(workingDir, ['remote', 'remove', 'origin']);
+  const skills = await installSkills(config, runDir);
+  const initialParent = await readParent(path.join(workingDir, 'pom.xml'));
+  return { runDir, workingDir, baselineCommit, repository, initialParent, skills, config };
+}
+
+async function installSkills(config, runDir) {
   const skills = [];
   if (config.install_skills) {
     const installed = path.join(runDir, 'skills');
@@ -64,8 +86,7 @@ async function prepare(config) {
       skills.push({ name: entry.name, directory });
     }
   }
-  const initialParent = await readParent(path.join(workingDir, 'pom.xml'));
-  return { runDir, workingDir, baselineCommit, repository, initialParent, skills, config };
+  return skills;
 }
 
 async function diff(workingDir, baselineCommit) {
@@ -113,10 +134,15 @@ async function result(state, { toolCalls, skillCalls, tokenUsage, turns, ...meta
   let finalParent;
   try { finalParent = await readParent(path.join(state.workingDir, 'pom.xml')); }
   catch (error) { finalParent = { error: error.message }; }
+  const gitActions = toolCalls.filter((call) => call.name === 'bash' && /\bgit\b/.test(call.input?.command ?? ''));
   return {
     output: JSON.stringify({ ...state.completion, repository: state.repository, initialParent: state.initialParent, finalParent,
       loadedSkills: skillCalls.filter((call) => !call.is_error).map((call) => call.name),
-      diff: shorten(workspaceDiff, 60000), sources: graderSources(toolCalls) }),
+      diff: shorten(workspaceDiff, 60000), sources: graderSources(toolCalls),
+      // Give the native quality judge actual Git-action evidence, not merely an
+      // agent's claim that it did not commit. The full transcript stays on disk.
+      gitActions: { count: gitActions.length, truncated: gitActions.length > 20,
+        commands: gitActions.slice(0, 20).map((call) => ({ command: shorten(call.input.command, 500), is_error: Boolean(call.is_error) })) } }),
     cached: false,
     tokenUsage,
     metadata: {
@@ -125,6 +151,7 @@ async function result(state, { toolCalls, skillCalls, tokenUsage, turns, ...meta
       initialParent: state.initialParent, completion: state.completion, turns,
       skillsInstalled: Boolean(state.config.install_skills),
       skillCalls, toolCalls, mavenTimeoutMs: state.config.mavenTimeoutMs,
+      ...(state.scenario ? { scenario: state.scenario, environment: state.environment } : {}),
       ...metadata,
     },
   };

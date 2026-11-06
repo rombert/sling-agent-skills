@@ -17,10 +17,10 @@ const isSlingRelease = (parent) => parent?.groupId === 'org.apache.sling' &&
   ['sling', 'sling-bundle-parent'].includes(parent.artifactId) && /^\d+$/.test(parent.version);
 
 async function checkUpgrade(metadata) {
-  const fail = (reason) => ({ pass: false, score: 0, reason });
+  const fail = (reason) => ({ pass: false, reason });
   if (!metadata?.workingDir || !metadata?.initialParent) return fail('Missing workspace or baseline parent');
   if (metadata.completion?.status !== 'completed') {
-    return fail(`Task did not complete: ${metadata.completion?.summary ?? 'finish_task was not called'}`);
+      return fail(`Task did not complete: ${metadata.completion?.summary ?? 'no completion recorded'}`);
   }
   try {
     const before = metadata.initialParent;
@@ -30,12 +30,14 @@ async function checkUpgrade(metadata) {
     if (BigInt(after.version) <= BigInt(before.version)) {
       return fail(`Parent was not upgraded: ${coordinates(before)} -> ${coordinates(after)}`);
     }
-    return { pass: true, score: 1, reason: `Parent upgraded: ${coordinates(before)} -> ${coordinates(after)}` };
+    const expected = metadata.scenario?.checks?.find((check) => check.type === 'pom_parent')?.expected;
+    if (expected && (after.groupId !== expected.group_id || after.artifactId !== expected.artifact_id || after.version !== expected.version)) {
+      return fail(`Expected exact parent ${expected.group_id}:${expected.artifact_id}:${expected.version}, got ${coordinates(after)}`);
+    }
+    return { pass: true, reason: `Parent upgraded: ${coordinates(before)} -> ${coordinates(after)}` };
   } catch (error) {
     return fail(`Cannot validate parent POM: ${error.message}`);
   }
 }
 
-module.exports = (_output, context) => checkUpgrade(context.providerResponse?.metadata);
-module.exports.readParent = readParent;
-module.exports.checkUpgrade = checkUpgrade;
+module.exports = { readParent, checkUpgrade };

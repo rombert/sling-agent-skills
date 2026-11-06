@@ -6,8 +6,9 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { test } = require('node:test');
 const Provider = require('./pi-provider.cjs');
-const parentGrade = require('./parent-upgrade.cjs');
-const skillGrade = require('./skill-usage.cjs');
+const parentGrade = require('./assertions/parent-upgrade.cjs');
+const skillGrade = require('./assertions/skill-usage.cjs');
+const { projectRoot } = require('../../shared/scenarios.cjs');
 
 const exec = promisify(execFile);
 const pom = '<project><parent><groupId>org.apache.sling</groupId><artifactId>sling-bundle-parent</artifactId><version>52</version></parent></project>\n';
@@ -29,7 +30,7 @@ function setEnv(t, name, value) {
 }
 
 async function fixture(t) {
-  const reposRoot = path.resolve(__dirname, '..', 'repos');
+  const reposRoot = path.join(projectRoot, 'repos');
   await fs.mkdir(reposRoot, { recursive: true });
   const root = await fs.mkdtemp(path.join(reposRoot, '.sling-pi-test-'));
   t.after(() => process.env.PI_EVAL_KEEP_ARTIFACTS ? undefined :
@@ -126,7 +127,7 @@ test('Pi adapter applies generation config, grades actual edits, and isolates re
   assert.equal(result.metadata.piVersion, '1.4.0-test');
   assert.equal(result.metadata.completion.status, 'completed');
   const revision = (await exec('git', ['rev-parse', 'HEAD'], { cwd: source })).stdout.trim();
-  const repository = { name: 'source', revision, directory: path.relative(path.resolve(__dirname, '..'), source) };
+  const repository = { name: 'source', revision, directory: path.relative(projectRoot, source) };
   assert.deepEqual(result.metadata.repository, repository);
   assert.deepEqual(JSON.parse(result.output).repository, repository);
   assert.equal((await parentGrade('', { providerResponse: result })).pass, true);

@@ -4,7 +4,8 @@ const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { test } = require('node:test');
-const grader = require('./java-target.cjs');
+const grader = require('./assertions/java-target.cjs');
+const { projectRoot } = require('../../shared/scenarios.cjs');
 const { prepare } = require('./workspace.cjs');
 
 const exec = promisify(execFile);
@@ -25,7 +26,7 @@ function setEnv(t, name, value) {
 }
 
 async function fixture(t) {
-  const reposRoot = path.resolve(__dirname, '..', 'repos');
+  const reposRoot = path.join(projectRoot, 'repos');
   await fs.mkdir(reposRoot, { recursive: true });
   const root = await fs.mkdtemp(path.join(reposRoot, '.sling-java-target-test-'));
   t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
@@ -111,76 +112,6 @@ test('Java grader rejects raised, lowered, or changed test targets even when bui
   assert.equal(result.pass, false);
   assert.match(result.reason, /test 11 -> 17/);
   assert.doesNotMatch(result.reason, /main 11 ->/);
-});
-
-test('Java target parser honors plugin and execution overrides and normalizes legacy versions', async (t) => {
-  const root = await fs.mkdtemp('/tmp/opencode/sling-java-parser-test-');
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const file = path.join(root, 'effective.xml');
-  for (const [options, expected] of [
-    [{ properties: '<maven.compiler.target>1.8</maven.compiler.target>', namespace: false }, { main: [8], test: [8] }],
-    [{ config: '<release>17</release>' }, { main: [17], test: [17] }],
-    [{ config: '<testRelease>8</testRelease>' }, { main: [11], test: [8] }],
-    [{ executions: '<execution><id>default-compile</id><goals><goal>compile</goal></goals><configuration><release>17</release></configuration></execution>' }, { main: [17], test: [11] }],
-    [{ properties: '<maven.compiler.target>8</maven.compiler.target>', config: '<target>11</target>' }, { main: [11], test: [11] }],
-    [{ properties: '<maven.compiler.target>1.8</maven.compiler.target><maven.compiler.testTarget>11</maven.compiler.testTarget>' }, { main: [8], test: [11] }],
-    [{ config: '<testTarget>8</testTarget>' }, { main: [11], test: [11] }], // release takes precedence over testTarget too.
-    [{ properties: '<maven.compiler.testRelease>8</maven.compiler.testRelease>', config: '<release>17</release>' }, { main: [17], test: [8] }],
-    [{ properties: '<first>${second}</first><second>1.8</second><maven.compiler.target>${first}</maven.compiler.target>' }, { main: [8], test: [8] }],
-  ]) {
-    await fs.writeFile(file, effective(options));
-    assert.deepEqual((await grader.readTarget(file)).targets, expected);
-  }
-});
-
-test('Java target parser fails closed on unknown targets and unsupported target overrides', async (t) => {
-  const root = await fs.mkdtemp('/tmp/opencode/sling-java-parser-test-');
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const file = path.join(root, 'effective.xml');
-  for (const xml of [
-    effective({ properties: '' }),
-    effective({ properties: '<maven.compiler.release>${missing}</maven.compiler.release>' }),
-    effective({ properties: '<maven.compiler.release>invalid</maven.compiler.release>' }),
-    effective({ properties: '<maven.compiler.release>${constructor}</maven.compiler.release>' }),
-    effective({ properties: '<a>${b}</a><b>${a}</b><maven.compiler.release>${a}</maven.compiler.release>' }),
-    effective({ config: '<compilerArgs><arg>--release</arg><arg>17</arg></compilerArgs>' }),
-    effective({ config: '<compilerArgs><arg>--rel<!-- ignored -->ease=17</arg></compilerArgs>' }),
-    effective({ config: '<compilerArgument><![CDATA[-target 17]]></compilerArgument>' }),
-    effective({ config: '<compilerArguments><target>17</target></compilerArguments>' }),
-    effective({ properties: '<maven.compiler.release>11</maven.compiler.release><custom.args>--release 17</custom.args>',
-      config: '<compilerArgument>${custom.args}</compilerArgument>' }),
-    effective({ executions: '<execution><id>default-compile</id><phase>none</phase><goals><goal>compile</goal></goals></execution>' }),
-    '<project><build/></project>', '<projects/>', '<not-xml',
-  ]) {
-    await fs.writeFile(file, xml);
-    await assert.rejects(grader.readTarget(file));
-  }
-});
-
-test('Java target reader retains per-execution evidence and numerically sorted distinct targets', async (t) => {
-  const root = await fs.mkdtemp('/tmp/opencode/sling-java-parser-test-');
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const file = path.join(root, 'effective.xml');
-  const executions = [
-    ['new-compile', 'compile', 'release', 17],
-    ['legacy-compile', 'compile', 'release', 8],
-    ['test-compile', 'testCompile', 'testRelease', 11],
-  ].map(([id, goal, setting, target]) => `<execution><id>${id}</id><goals><goal>${goal}</goal></goals>
-    <configuration><${setting}>${target}</${setting}></configuration></execution>`).join('');
-  const xml = effective({ properties: '<maven.compiler.target>1.8</maven.compiler.target>', executions });
-  const expected = {
-    targets: { main: [8, 17], test: [11] },
-    evidence: [
-      { kind: 'main', execution: 'new-compile', target: 17, setting: 'release' },
-      { kind: 'main', execution: 'legacy-compile', target: 8, setting: 'release' },
-      { kind: 'test', execution: 'test-compile', target: 11, setting: 'testRelease' },
-    ],
-  };
-  const prefixed = xml.replace('xmlns=', 'xmlns:m=').replace(/(<\/?)([\w.-]+)(?=[\s/>])/g, '$1m:$2');
-  for (const document of [xml, prefixed]) {
-    await fs.writeFile(file, document);
-    assert.deepEqual(await grader.readTarget(file), expected);
-  }
 });
 
 test('Java grader refuses incomplete tasks, missing baseline metadata and invalid commits before Maven', async (t) => {

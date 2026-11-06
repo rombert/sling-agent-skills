@@ -5,14 +5,16 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { test } = require('node:test');
 const { prepare, result } = require('./workspace.cjs');
-const grade = require('./maven-verify.cjs');
-const parentGrade = require('./parent-upgrade.cjs');
-const skillGrade = require('./skill-usage.cjs');
-const { run, tail } = require('./process.cjs');
+const grade = require('./assertions/maven-verify.cjs');
+const parentGrade = require('./assertions/parent-upgrade.cjs');
+const skillGrade = require('./assertions/skill-usage.cjs');
+const { run: runProcess, tail } = require('../../shared/process.cjs');
+const { childEnvironment } = require('./environment.cjs');
+const run = (command, args, options) => runProcess(command, args, { ...options, env: childEnvironment() });
 const { toolKey } = require('./tool-key.cjs');
 
 const exec = promisify(execFile);
-const projectRoot = path.resolve(__dirname, '..');
+const { projectRoot } = require('../../shared/scenarios.cjs');
 const reposRoot = path.join(projectRoot, 'repos');
 const restoredEnvs = new WeakMap();
 
@@ -169,6 +171,7 @@ test('workspace result retains actual edits, new files, skill reads and bounded 
     { name: 'bash', input: { command }, output: 'old result' },
     { name: 'bash', input: { command }, output: 'Release 99 ' + 'x'.repeat(5000) },
     { name: 'bash', input: { command: 'wget https://example.invalid/missing' }, is_error: true, output: '404' },
+    { name: 'bash', input: { command: 'git diff --stat' }, output: '1 file changed' },
   ];
   const skillCalls = [{ name: 'update-sling-parent-pom', is_error: false }, { name: 'other', is_error: true }];
   const response = await result(state, { toolCalls, skillCalls, turns: 4, tokenUsage: { total: 48 }, harness: 'pi' });
@@ -190,6 +193,7 @@ test('workspace result retains actual edits, new files, skill reads and bounded 
   assert.match(output.sources[0].output, /truncated/);
   assert.ok(output.sources[0].output.length < 4500);
   assert.equal(output.sources[1].is_error, true);
+  assert.deepEqual(output.gitActions, { count: 1, truncated: false, commands: [{ command: 'git diff --stat', is_error: false }] });
   assert.equal(await fs.readFile(path.join(state.runDir, 'changes.patch'), 'utf8'), response.metadata.workspaceDiff);
   assert.equal(await fs.readFile(path.join(state.runDir, 'summary.txt'), 'utf8'), state.completion.summary);
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(state.runDir, 'completion.json'))), state.completion);
