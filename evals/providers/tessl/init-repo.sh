@@ -16,15 +16,16 @@ bundle=$(realpath resources/source.bundle)
 baseline=$(cat resources/baseline.txt)
 test "${#baseline}" = 40
 case "$baseline" in *[!0-9a-f]*) echo 'Invalid baseline SHA' >&2; exit 1;; esac
-# Native commit fixtures already have a populated repository. Keep its index
-# and object store: moving .git leaves the source files untracked, causing the
-# subsequent checkout to refuse to overwrite them. Import the original history
-# into that repository instead of depending on its platform-generated SHA.
+# Native snapshots include ALL installed inputs, including resources, SDK and
+# skill context. Keep the object store and payload files. A normal checkout of
+# the source revision would delete every tracked harness input absent there.
+native_baseline=
 if [ -e .git ]; then
     test -d .git && test ! -L .git
     test "$(git rev-parse --show-toplevel)" = "$(pwd -P)"
     test -z "$(git status --porcelain --untracked-files=no)"
-    git rev-parse --verify HEAD > resources/native-baseline.txt 2>/dev/null || :
+    native_baseline=$(git rev-parse --verify HEAD 2>/dev/null) || :
+    printf '%s\n' "$native_baseline" > resources/native-baseline.txt
 else
     git init --quiet --initial-branch=main --object-format=sha1 --template= .
 fi
@@ -35,7 +36,15 @@ git config user.name 'Evaluation Agent'
 git config user.email 'eval@example.invalid'
 git bundle verify "$bundle"
 git fetch --quiet "$bundle" HEAD
-git -c advice.detachedHead=false checkout --quiet --detach "$baseline"
+if [ -n "$native_baseline" ]; then
+    # Replace only the disposable index/HEAD, never the worktree. Source files
+    # must already match the imported prepared tree; refuse any mismatch.
+    git read-tree "$baseline"
+    git diff --quiet
+    git update-ref --no-deref HEAD "$baseline"
+else
+    git -c advice.detachedHead=false checkout --quiet --detach "$baseline"
+fi
 test "$(git rev-parse HEAD)" = "$baseline"
 mkdir -p .git/info
 printf '\n/resources/\n/.eval-toolchain/\n/init-repo.sh\n/setup.sh\n' >> .git/info/exclude

@@ -108,8 +108,11 @@ setup-created repository alone allowed solving but failed native `compute-diff`.
 
 Native commit fixtures install a fresh, single-commit snapshot. The included
 bundle restores original source history and the exact prepared baseline into
-that repository, preserving its index/object store. Moving its `.git` aside would
-leave the installed files untracked and break checkout. Original source SHA,
+that repository. Tessl's initial synthetic commit also tracks SDK, resources and
+skill context: ordinary checkout would delete those inputs. Setup replaces only
+the disposable index/HEAD, verifies that source files match the prepared tree,
+and leaves the worktree and object store intact. Moving `.git` aside would also
+leave installed source files untracked and break checkout. Original source SHA,
 prepared baseline SHA and native starting SHA are retained separately. Setup
 refuses repeated installation and Git pointers/symlinks to another checkout.
 The task prompt remains byte-for-byte equal to the shared prompt. All fixture
@@ -149,6 +152,10 @@ The image defaults to the locally installed `sling-llmao-pi:1.1.0-jdk21-v3`;
 override `TESSL_ROOTLESS_IMAGE` to use another existing Linux image with Maven,
 Git and POSIX sh. The test never pulls an image or submits an evaluation. It
 retains its log and disposable workspace for diagnosis.
+`TESSL_NATIVE_CONTEXT_ARCHIVE` optionally supplies a retained native context tar
+archive, including the actual installed skill links and Tessl metadata. The
+regression snapshots all installed inputs before setup and verifies the reference
+build without deleting skill context or weakening Maven checks.
 
 See [VALIDATION.md](VALIDATION.md) for actual hosted results, diagnosed setup
 failures, credit usage and the scope of demonstrated parity. Passing local

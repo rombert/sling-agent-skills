@@ -227,18 +227,39 @@ test('Tessl fixture packaging rehearses real bundle/include/setup semantics with
   await fs.writeFile(path.join(populated, '.gitignore'), '.tokensave/\n');
   await fs.writeFile(path.join(populated, 'pom.xml'), await fs.readFile(path.join(source, 'pom.xml')));
   await fs.writeFile(path.join(populated, 'prepared.txt'), 'fixture setup\n');
+  await fs.cp(path.join(manifest.source, scenario.id, 'resources'), path.join(populated, 'resources'), { recursive: true });
+  await fs.mkdir(path.join(populated, '.eval-toolchain'));
+  await fs.writeFile(path.join(populated, '.eval-toolchain/input-marker'), 'SDK fixture\n');
+  await fs.mkdir(path.join(populated, '.claude/skills/fixture-skill'), { recursive: true });
+  await fs.writeFile(path.join(populated, '.claude/skills/fixture-skill/SKILL.md'), 'Native context\n');
   await git(['init', '--quiet'], populated);
   await git(['add', '.'], populated);
   await git(['-c', 'user.name=Native Fixture', '-c', 'user.email=native@example.invalid', '-c', 'core.hooksPath=/dev/null',
     'commit', '--quiet', '--no-gpg-sign', '-m', 'Native fixture snapshot'], populated);
   const nativeHead = await git(['rev-parse', 'HEAD'], populated);
-  await fs.cp(path.join(manifest.source, scenario.id, 'resources'), path.join(populated, 'resources'), { recursive: true });
   const populatedRuntime = path.join(root, 'populated-runtime');
   await exec('sh', [native], { cwd: populated, env: { ...process.env, EVAL_RUNTIME_ROOT: populatedRuntime } });
   assert.equal(await git(['rev-parse', 'HEAD'], populated), first.baselineCommit);
-  assert.equal(await git(['status', '--porcelain'], populated), '');
+  assert.equal(await git(['status', '--porcelain', '--untracked-files=no'], populated), '');
+  assert.equal(await fs.readFile(path.join(populated, '.eval-toolchain/input-marker'), 'utf8'), 'SDK fixture\n');
+  assert.equal(await fs.readFile(path.join(populated, '.claude/skills/fixture-skill/SKILL.md'), 'utf8'), 'Native context\n');
   assert.equal(await git(['cat-file', '-t', nativeHead], populated), 'commit');
   assert.equal((await fs.readFile(path.join(populatedRuntime, 'fixture/native-baseline.txt'), 'utf8')).trim(), nativeHead);
+  // An index-only baseline import must still reject mismatched source content,
+  // without checking it out over the differing file.
+  const mismatched = path.join(root, 'mismatched-sandbox');
+  await git(['clone', '--quiet', '--no-local', first.rehearsal, mismatched], root);
+  const changedPom = (await fs.readFile(path.join(mismatched, 'pom.xml'), 'utf8')).replace('34', '35');
+  await fs.writeFile(path.join(mismatched, 'pom.xml'), changedPom);
+  await fs.cp(path.join(manifest.source, scenario.id, 'resources'), path.join(mismatched, 'resources'), { recursive: true });
+  await git(['add', '--all'], mismatched);
+  await git(['-c', 'user.name=Native Fixture', '-c', 'user.email=native@example.invalid', '-c', 'core.hooksPath=/dev/null',
+    'commit', '--quiet', '--no-gpg-sign', '-m', 'Mismatched native snapshot'], mismatched);
+  const mismatchedHead = await git(['rev-parse', 'HEAD'], mismatched);
+  await assert.rejects(exec('sh', [native], { cwd: mismatched, env: { ...process.env,
+    EVAL_RUNTIME_ROOT: path.join(root, 'mismatched-runtime') } }));
+  assert.equal(await fs.readFile(path.join(mismatched, 'pom.xml'), 'utf8'), changedPom);
+  assert.equal(await git(['rev-parse', 'HEAD'], mismatched), mismatchedHead);
 });
 
 test('Tessl secrets never enter repository/build child environments', () => {

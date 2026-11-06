@@ -30,14 +30,18 @@ cd /workspace/solution
 git init --quiet --initial-branch=main --object-format=sha1 --template= .
 git -c core.hooksPath=/dev/null fetch --quiet resources/source.bundle HEAD
 git -c advice.detachedHead=false checkout --quiet --detach "$(cat resources/baseline.txt)"
+${process.env.TESSL_NATIVE_CONTEXT_ARCHIVE ? 'tar -xf /native-context.tar -C /workspace/solution' : ''}
+git add --all
+git -c user.name='Native Fixture' -c user.email=native@example.invalid -c core.hooksPath=/dev/null commit --quiet --no-gpg-sign -m 'Native fixture snapshot'
 # Hosted setup may not receive the agent's env-file variables.
 env -u EVAL_RUNTIME_ROOT -u JAVA_HOME PATH="/workspace/initial-bin:$PATH" sh ./init-repo.sh
+${process.env.TESSL_NATIVE_CONTEXT_ARCHIVE ? 'for skill in update-sling-parent-pom osgi-scr-migrator sling-release; do test -r ".claude/skills/tessl__$skill/SKILL.md"; done' : ''}
 export JAVA_HOME=/workspace/solution/.eval-toolchain/runtime/jdk-21
 export PATH="$JAVA_HOME/../bin:$JAVA_HOME/bin:$PATH"
 java -version
 mvn -version
 test ! -e resources
-test -z "$(git status --porcelain)"
+test -z "$(git status --porcelain --untracked-files=no)"
 ${reference ? 'cp /reference-pom.xml pom.xml\nmvn -B -o -Dmaven.repo.local=/m2 clean verify' : ''}
 `;
   await fs.writeFile(path.join(root, 'rehearse.sh'), script);
@@ -47,6 +51,7 @@ ${reference ? 'cp /reference-pom.xml pom.xml\nmvn -B -o -Dmaven.repo.local=/m2 c
     '-v', `${root}/solution:/workspace/solution`];
   if (reference) args.push('-v', `${path.resolve(reference)}:/reference-pom.xml:ro`,
     '-v', `${process.env.HOME}/.m2/repository:/m2:ro`);
+  if (process.env.TESSL_NATIVE_CONTEXT_ARCHIVE) args.push('-v', `${path.resolve(process.env.TESSL_NATIVE_CONTEXT_ARCHIVE)}:/native-context.tar:ro`);
   args.push(process.env.TESSL_ROOTLESS_IMAGE ?? 'sling-llmao-pi:1.1.0-jdk21-v3', '/workspace/rehearse.sh');
   let output;
   try { const result = await exec('docker', args, { timeout: 160000, maxBuffer: 8 * 1024 * 1024 }); output = result.stdout + result.stderr; }

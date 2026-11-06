@@ -87,15 +87,17 @@ async function prepare(manifest, { toolchain = provisionToolchain } = {}) {
     await exec('git', ['archive', '--format=tar', `--output=${archive}`, ref], {
       cwd: manifest.generation, env: environment(), timeout: 120000 });
     await exec('tar', ['-xf', archive, '-C', rehearsal], { env: environment() });
+    // Tessl snapshots installed includes and directory fixtures together with
+    // the codebase before setup; they are tracked in the synthetic commit too.
+    await fs.cp(resources, path.join(rehearsal, 'resources'), { recursive: true });
+    await fs.cp(toolchainDirectory, path.join(rehearsal, '.eval-toolchain'), {
+      recursive: true, mode: require('node:fs').constants.COPYFILE_FICLONE });
     for (const command of [
       ['init', '--quiet', '--initial-branch=main', '--object-format=sha1', '--template=', '.'],
       ['add', '--all'],
       ['-c', 'user.name=Native Fixture', '-c', 'user.email=native@example.invalid', '-c', 'core.hooksPath=/dev/null',
         'commit', '--quiet', '--no-gpg-sign', '-m', 'Native fixture snapshot'],
     ]) await exec('git', command, { cwd: rehearsal, env: environment(), timeout: 120000 });
-    await fs.cp(resources, path.join(rehearsal, 'resources'), { recursive: true });
-    await fs.cp(toolchainDirectory, path.join(rehearsal, '.eval-toolchain'), {
-      recursive: true, mode: require('node:fs').constants.COPYFILE_FICLONE });
     const runtimeRoot = path.join(runDir, 'runtime');
     const result = await exec('sh', [path.join(manifest.source, scenario.id, 'init-repo.sh')], {
       cwd: rehearsal, env: { ...environment(), EVAL_RUNTIME_ROOT: runtimeRoot }, timeout: 120000, maxBuffer: 1024 * 1024 });

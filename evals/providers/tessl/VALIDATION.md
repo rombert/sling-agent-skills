@@ -1,15 +1,16 @@
 # Validation record — 2026-11-06
 
-## Outcome: native commit-fixture scoring validated; combined setup still blocked
+## Outcome: combined setup failure reproduced and fixed; migration validation in progress
 
 The provider, native conversion and five-project catalog are implemented and
 locally verified. Hosted setup and a coding-agent attempt completed, but that
 run's native scorer lacked a commit-fixture baseline. A minimal native commit
 fixture control subsequently completed both solving and scoring with **1/1**.
 The adapter now supplies native prepared-baseline refs and preserves their Git
-metadata. The subsequent migration attempt still failed setup, so a first-attempt
-trace of the complete fixture/toolchain/context combination is being collected.
-Full catalog/both-arm parity is not yet demonstrated. Native scores and independent executable checks are
+metadata. A full setup trace then exposed native snapshot tracking of harness
+inputs; the index-only restoration fix passed a reference build with actual native
+skill context. A new scored standalone migration is in progress. Full catalog/
+both-arm parity is not yet demonstrated. Native scores and independent executable checks are
 always separate evidence, not interchangeable grading systems.
 
 ## Troubleshooting and credit record
@@ -27,10 +28,11 @@ not platform quotes. No automatic adapter retries or rescoring were used.
 | `01a1b1df-7317-708b-8417-f63c10cdaa81` | Native commit fixture with existing custom setup | Setup failed before model; local reproduction below | 10 |
 | `01a1b1e1-3625-71dd-be86-efb852d4a8e1` | Native commit fixture, no custom setup | Solve and scoring completed; diagnostic 1/1; solution downloaded | 10.5185626 |
 | `01a1b1e5-80b0-7395-9ef9-0999083ed08e` | Migration with native fixture and preserved Git metadata | Setup failed before model; final attempt could not read resources/baseline.txt | 10 |
+| `01a1b1e8-a1ca-76a7-a948-fc94fd135920` | Combined native fixture/SDK/context trace | Completed; diagnostic 1/1; exposed checkout deletion of harness payload | 10.9268194 |
 
 Confirmed subtotal before the corrected scored run: **82.5383888 credits**.
 Local CLI validation rejections created no remote run and are not extra charges.
-Finalized charges across the table are **113.0569514 credits**, excluding the
+Finalized charges across the table are **123.9837708 credits**, excluding the
 nonterminal migration runs. Diagnostic scores are not calibrated migration passes.
 
 ### Corrected standalone run: scorer integration failure
@@ -89,8 +91,21 @@ reported stderr includes `cat: resources/baseline.txt: No such file or directory
 Because native setup retries can change the sandbox between attempts, this alone
 does not identify the first failing command. A separate diagnostic now captures
 the initial file layout and a single traced setup attempt with all native Git,
-SDK, include and skill-context inputs present; it returns success only to retain
-the diagnostic logs and is never used as calibrated production setup.
+SDK, include and skill-context inputs present. That diagnostic completed and its
+downloaded setup log showed checkout succeeded, but deleted the tracked harness
+inputs before `sh resources/runtime.sh` failed with exit 2. Native commit
+`da6f3413` included the SDK, resources, `.claude`/`.agents` skill links, `.tessl`
+plugin content and root framework metadata. Those paths are absent from the
+original source commit, so ordinary checkout removed them, including the skills.
+
+Setup now uses an index-only `read-tree`, verifies source-file equality, then
+detaches HEAD at the original prepared baseline without changing the worktree.
+The original history, harness resources, SDK and skill context all remain intact.
+The regression tracks all installed inputs in the native snapshot and checks
+that source mismatches fail without overwriting files. The rootless full reference
+build additionally passed with the **actual native installed context archive**,
+retaining skill links and metadata without weakening Maven checks. The corrected
+standalone generation is `c39e85ce-20ac-4b30-8ff3-0374059ea0e5`.
 
 Actual hosted diagnostic logs confirm:
 
