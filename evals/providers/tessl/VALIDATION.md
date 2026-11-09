@@ -1,6 +1,6 @@
-# Validation record — 2026-11-06
+# Validation record — retained evidence reviewed 2026-11-09
 
-## Outcome: first real migration independently verified; full catalog batch in progress
+## Outcome: full native batch complete; independent collection incomplete
 
 The standalone skills-arm migration completed hosted setup, solving, scoring,
 automatic download and independent executable verification. Parent 52, Java 8
@@ -8,9 +8,49 @@ main/test targets, all six tests and required bundle metadata passed. The native
 judge scored **9/10**; the sole missing point was transcript-based skill evidence,
 while native activation metadata separately confirmed successful skill-tool use.
 New generations enforce activation through a mandatory metadata audit instead
-of an unsupported judge item. Historical scores remain unchanged. Full catalog/
-both-arm batch has entered native submission, but results are not yet available.
-Scores, executable checks and activation audits are distinct evidence.
+of an unsupported judge item. Historical scores remain unchanged. The full five-
+project/both-arm batch subsequently completed native scoring in all ten slots,
+with seven perfect scores and correct activation behavior in all ten. Independent
+collection stopped after one verification failure and a subsequent download error;
+nine full-batch executable outcomes remain unverified. Scores, executable checks
+and activation audits are distinct evidence; full passing parity is not established.
+
+### Completed full batch and collection interruption
+
+Run `01a1b212-71c8-735e-88c2-3ac9991db884` is `completed`. Its frozen generation is
+`target/evals/tessl/generations/6514ef39-3f5e-40be-be31-d6a8ee650f3c/`; `result.json`
+and `native-01a1b212-71c8-735e-88c2-3ac9991db884.json` retain the native outcome.
+The submission ledger is `postprocessing-failed`, not a failed remote solve.
+
+| Scenario | Native with skills | Native without skills | Independent full-batch verification |
+|---|---:|---:|---|
+| discovery-impl | 8.75/9 | 9/9 | Without skills: FAIL; with skills: not collected |
+| JCR packageinit | 8.5/9 | 9/9 | Neither arm collected |
+| JCR JS nodetypes | 10/10 | 8/10 | Neither arm collected |
+| JUnit healthcheck | 9/9 | 9/9 | Neither arm collected |
+| discovery-standalone | 9/9 | 9/9 | Neither arm collected (the earlier separate skills run passed) |
+
+Native deductions were for unnecessary Mockito upgrades in the discovery-impl
+and packageinit skills arms (packageinit also added `.sling-module.json`), and for
+retaining old Mockito with a forbidden `--add-opens` workaround in JCR JS without
+skills. No scores have been rewritten. Each skills arm has relevant native
+`read` activation evidence; every no-skills arm has an empty `activatedSkills`.
+
+Only solution `01a1b212-7646-74f1-94f0-a7298f52e7b8` (discovery-impl without skills)
+completed independent verification. It preserved Java 11 targets but failed
+`TopologyEventTest>AbstractTopologyEventTest.testGetDuringDelay:234`, expecting
+zero events and observing one: 45 tests, one failure, no final JAR. The build log
+reports roughly one day and 18 hours elapsed. The cause is unresolved; this is
+not classified as a confirmed model defect or a confirmed flaky test.
+
+The next solution download failed with `getaddrinfo EAI_AGAIN tessl.io`, PostHog
+network errors and a request to authenticate. Collection aborted before writing
+a complete `verification-report.json`. Resume downloads/independent checks only
+after connectivity/authentication is restored; **do not resubmit or rescore the
+completed batch**. This review used retained artifacts only and made no new
+remote calls. The collector also needs incremental persistence/resume support
+to avoid losing its partial aggregate or unnecessarily repeating completed work
+after a later download fails.
 
 ## Troubleshooting and credit record
 
@@ -29,11 +69,14 @@ not platform quotes. No automatic adapter retries or rescoring were used.
 | `01a1b1e5-80b0-7395-9ef9-0999083ed08e` | Migration with native fixture and preserved Git metadata | Setup failed before model; final attempt could not read resources/baseline.txt | 10 |
 | `01a1b1e8-a1ca-76a7-a948-fc94fd135920` | Combined native fixture/SDK/context trace | Completed; diagnostic 1/1; exposed checkout deletion of harness payload | 10.9268194 |
 | `01a1b1f1-7247-71ce-9c6f-4fd3f21cf209` | Real standalone migration, skills arm | Native 9/10; independent checks PASS; native skill-tool activation confirmed | 13.0291564 |
+| `01a1b212-71c8-735e-88c2-3ac9991db884` | Five projects, both arms, one repetition | All ten native slots completed; independent collection interrupted | 157.2458338 |
 
 Confirmed subtotal before the corrected scored run: **82.5383888 credits**.
 Local CLI validation rejections created no remote run and are not extra charges.
-Finalized charges across the table are **137.0129272 credits**, excluding the
-nonterminal migration runs. Diagnostic scores are not calibrated migration passes.
+Finalized charges across the table are **294.258761 credits**, including the
+full batch's **157.2458338 credits**. The older nonterminal run's provisional
+2.8547634 credits remain excluded; its current remote status was not rechecked.
+Diagnostic scores are not calibrated migration passes.
 
 ### Corrected standalone run: scorer integration failure
 
@@ -156,8 +199,9 @@ The subsequent launch passed local preparation and wrote submission ledger
 `fe9d143df7c77c584e97dbfadd4324a428059e6d56647f9985813a18ee7a76de-1.json`.
 The CLI quoted **100 platform credits plus variable AI usage**, not a finalized
 charge. The batch covers all five scenarios, both explicit arms, one repetition
-each. Results and actual credits are pending. Do not resubmit this fingerprint
-on timeout; inspect the retained native response and collect results read-only.
+each. The subsequent completion, actual charge and interrupted independent
+collection are recorded above. Do not resubmit this fingerprint on timeout;
+inspect the retained native response and collect results read-only.
 The relevant offline suites now pass **30 tests**, with one opt-in skipped.
 
 Actual hosted diagnostic logs confirm:

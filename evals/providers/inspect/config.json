@@ -1,0 +1,7 @@
+{
+  "maxTurns": 80,
+  "maxTextOnlyTurns": 3,
+  "maxToolRepeats": 3,
+  "taskTimeoutSeconds": 3600,
+  "compactionReserveTokens": 16384
+}

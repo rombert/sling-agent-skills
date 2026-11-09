@@ -4,11 +4,23 @@ Real-repository scenarios live in [`scenarios.yaml`](scenarios.yaml). The top-le
 Makefile selects a provider adapter to generate its native configuration and run
 evaluations. Promptfoo, Tessl and Inspect have adapters.
 
-**Tessl hosted validation:** the first real migration completed native scoring
-and passed independent executable checks; native metadata confirmed skill use.
-Full catalog/both-arm validation is next, not yet demonstrated. See the
-[validation record](providers/tessl/VALIDATION.md) for demonstrated scope,
-remaining limitations and actual credit usage.
+## Validation status (retained evidence reviewed 2026-11-09)
+
+All three adapters generate the same five pinned scenarios and explicit skill/
+no-skill arms. Implemented coverage is not the same as verified live coverage:
+
+| Provider | Demonstrated live results | Remaining gaps |
+|---|---|---|
+| Promptfoo / Pi | One JCR JS skills-arm smoke passed all five assertions, including independent builds/artifact checks. Shared checks passed again on its retained solution after the refactor. | No full five-project/both-arm live batch; the newly shared model-config wiring has offline coverage, not a new live run. |
+| Tessl / hosted Claude agent | All ten slots completed native scoring; seven received full marks. All ten activation records match the expected arm. A separate standalone skills run passed independent verification. | Full-batch collection stopped after one independent check, which failed a discovery timing test. Nine slots remain independently unverified; native scores are not build passes. Downloads need restored connectivity/authentication. |
+| Inspect / native ReAct | In the attempted full batch, JCR JS and packageinit passed all five scorers in both arms (four slots), including independent verification and audited skill behavior. | Only seven of ten sample records are retained: two standalone connection errors, a healthcheck skills-arm HTTP 429, and no records for the other three slots. The log is unfinished, not a successful full batch. |
+
+No repeated benchmark or statistically established skill effect is available.
+Native judge scores, executable checks and activation evidence remain distinct;
+models, agent tools, runtimes and context management are not identical across
+providers. Details: [Promptfoo](providers/promptfoo/README.md#import-and-smoke-test-provenance),
+[Tessl validation](providers/tessl/VALIDATION.md),
+[Inspect validation](providers/inspect/README.md#live-validation-2026-11-06).
 
 ## Layout and dependency boundary
 

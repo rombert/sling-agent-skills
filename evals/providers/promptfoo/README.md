@@ -41,8 +41,8 @@ aliases for the singular targets.
 
 `SCENARIO=all` (the default) selects calibrated scenarios only; a comma-separated
 list selects specific IDs. Unknown IDs and uncalibrated draft tasks are rejected.
-`PROVIDER=promptfoo` is currently the only framework adapter. Tessl and Inspect
-are explicitly deferred, not silently mapped to Promptfoo.
+`PROVIDER=promptfoo` selects this Pi-based adapter. Tessl and Inspect have their
+own adapters; they are not silently mapped to Promptfoo.
 
 Generated JSON lives at `target/evals/promptfoo.json` (override with
 `EVAL_CONFIG`). Native Promptfoo results are retained at
@@ -92,10 +92,12 @@ The equivalent direct Promptfoo command after generation is:
 sops exec-env .env 'npx --yes promptfoo@0.125.1 eval --config target/evals/promptfoo.json --no-cache --repeat 1'
 ```
 
-In `evals/providers/promptfoo/config.yaml`, change `providers[0].config.model` to select the coding model for **both**
-arms; the second provider inherits the YAML anchor. The same applies to `apiBaseUrl`,
-`temperature`, `maxTokens`, and `chatTemplateKwargs`. Labels are display names, not model selections.
-The grading model is configured separately under `defaultTest.options.provider`.
+In `evals/models.json`, change `coding.model` to select the coding model for **both**
+arms and for both Promptfoo and Inspect. The gateway (`apiBaseUrl`), `temperature`,
+`maxTokens`, `contextWindow` and `chatTemplateKwargs` are also selected there.
+Labels are display names, not model selections. The grading model is selected
+separately under `grading.model`. Pi-specific settings stay in this adapter's
+`config.yaml`.
 
 Pi explicitly sends `temperature: 0` and `max_tokens: 8192` by default.
 `contextWindow: 131072` describes Pi's model metadata; it does not change the

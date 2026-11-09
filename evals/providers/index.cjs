@@ -3,6 +3,7 @@
 function getProvider(name) {
   if (name === 'promptfoo') return require('./promptfoo/index.cjs');
   if (name === 'tessl') return require('./tessl/index.cjs');
+  if (name === 'inspect') return require('./inspect/index.cjs');
   throw new Error(`Unsupported evaluation provider: ${name}; adapter is not implemented yet`);
 }
 

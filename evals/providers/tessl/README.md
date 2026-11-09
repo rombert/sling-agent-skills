@@ -4,7 +4,8 @@ This adapter converts the **same calibrated real-repository catalog** as
 Promptfoo into Tessl's native `task.md`, `criteria.json`, `scenario.json`, setup
 scripts and explicit variants. It does not import the synthetic tasks or root
 agent-context changes from `evals/tessl` (`b5edb0f`). That branch's native format
-is retained, not its separate scenario facts. Inspect remains deferred.
+is retained, not its separate scenario facts. [Inspect](../inspect/README.md) has
+a separate native adapter using the Apache gateway.
 
 ## Prerequisites and conservative workflow
 

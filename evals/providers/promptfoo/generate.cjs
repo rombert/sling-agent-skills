@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const YAML = require('yaml');
 const { projectRoot } = require('../../shared/scenarios.cjs');
+const models = require('../../models.json');
 
 function rubric(scenario) {
   const parent = scenario.checks.find((check) => check.type === 'pom_parent').expected;
@@ -16,14 +17,14 @@ async function generate({ scenarios, arm, output }) {
   const template = YAML.parse(await fs.readFile(path.join(__dirname, 'config.yaml'), 'utf8'), { merge: true });
   const providers = template.providers.filter((p) => arm === 'both' || p.label === `pi-${arm}`).map((p) => ({
     ...p, id: `file://${path.join(__dirname, 'pi-provider.cjs')}`,
-    config: { ...p.config, skills_dir: path.join(projectRoot, 'skills') },
+    config: { ...p.config, ...models.coding, apiBaseUrl: models.apiBaseUrl, skills_dir: path.join(projectRoot, 'skills') },
   }));
   if (!providers.length) throw new Error(`No providers configured for arm ${arm}`);
   const assertion = (metric, file) => ({ type: 'javascript', metric, value: `file://${path.join(__dirname, 'assertions', file)}` });
   const config = {
     description: template.description,
     prompts: ['{{task}}'], providers, evaluateOptions: template.evaluateOptions,
-    defaultTest: { options: template.defaultTest.options },
+    defaultTest: { options: { provider: { id: `litellm:${models.grading.model}`, config: { apiBaseUrl: models.apiBaseUrl } } } },
     tests: scenarios.map((scenario) => ({ description: scenario.id,
       vars: { task: scenario.prompt, scenario },
       assert: [assertion('ParentUpgrade', 'parent-upgrade.cjs'), assertion('SkillUsage', 'skill-usage.cjs'),

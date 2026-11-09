@@ -1,0 +1,5 @@
+[project]
+name = "sling-inspect-evals"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["inspect-ai==0.3.287", "openai>=3.4,<4", "pyyaml>=6,<7"]
