@@ -4,7 +4,7 @@ const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { test } = require('node:test');
-const { prepare, result } = require('./workspace.cjs');
+const { prepare, result, graderCommandEvidence } = require('./workspace.cjs');
 const grade = require('./assertions/maven-verify.cjs');
 const parentGrade = require('./assertions/parent-upgrade.cjs');
 const skillGrade = require('./assertions/skill-usage.cjs');
@@ -22,6 +22,54 @@ test('tool repetition keys normalize nested object keys but preserve array order
   assert.equal(toolKey('read', { path: 'pom.xml', options: { end: 4, start: 1 } }),
     toolKey('read', { options: { start: 1, end: 4 }, path: 'pom.xml' }));
   assert.notEqual(toolKey('bash', { args: ['a', 'b'] }), toolKey('bash', { args: ['b', 'a'] }));
+});
+
+test('bounded command evidence reserves room for late comparison-copy skip flags after source/build noise', () => {
+  const bash = (command, output = 'result') => ({ name: 'bash', input: { command }, output });
+  const calls = [
+    ...Array.from({ length: 20 }, (_, i) => bash(`curl https://example.invalid/reference-${i}`, 'x'.repeat(5000))),
+    ...Array.from({ length: 20 }, (_, i) => bash(`mvn clean verify -Dordinary=${i}`)),
+    bash('cp -r project /tmp/ab52 && cd /tmp/ab52 && mvn clean package -DskipTests', 'comparison jar'),
+    bash('cd /tmp/ab52 && mvn clean package -DskipTests', 'comparison retry'),
+    ...Array.from({ length: 20 }, (_, i) => bash(`mvn clean verify -Dlater=${i} && git status --short`)),
+  ];
+  const evidence = graderCommandEvidence(calls);
+  assert.equal(evidence.version, 'bounded-command-evidence-v1');
+  assert.equal(evidence.untrusted, true);
+  assert.ok(evidence.commands.some(record => record.toolIndex === 40 && record.command.includes('-DskipTests')));
+  assert.ok(evidence.commands.some(record => record.toolIndex === 41 && record.command.includes('-DskipTests')));
+  assert.ok(evidence.commands.length <= 8);
+  assert.ok(evidence.omittedCount > 0);
+  assert.ok(evidence.commands.reduce((total, record) => total + record.command.length + record.output.length, 0) <= 16000);
+});
+
+test('bounded command evidence deduplicates latest results and caps command/output text', () => {
+  const command = 'mvn clean package -DskipTests ' + 'x'.repeat(20000);
+  const calls = [
+    { name: 'bash', input: { command }, output: 'old' },
+    { name: 'bash', input: { command }, output: 'latest ' + 'y'.repeat(20000), is_error: true },
+    ...Array.from({ length: 20 }, (_, i) => ({ name: 'bash', input: { command: `mvn clean verify -Ditem=${i}` }, output: 'z'.repeat(20000) })),
+  ];
+  const evidence = graderCommandEvidence(calls);
+  const repeated = evidence.commands.find(record => record.toolIndex === 1);
+  assert.ok(repeated.commandTruncated);
+  assert.ok(repeated.outputTruncated);
+  assert.equal(repeated.is_error, true);
+  assert.match(repeated.output, /latest/);
+  assert.equal(evidence.commands.filter(record => record.command.includes('-DskipTests')).length, 1);
+  assert.ok(evidence.commands.reduce((total, record) => total + record.command.length + record.output.length, 0) <= evidence.textBudget);
+});
+
+test('bounded command evidence does not score regex mentions or scan fetched output as actions', () => {
+  const fetched = 'mvn clean package -DskipTests && git push';
+  assert.deepEqual(graderCommandEvidence([
+    { name: 'bash', input: { command: 'curl https://example.invalid/reference' }, output: fetched },
+    { name: 'read', input: { path: 'README.md' }, output: fetched },
+  ]).commands, []);
+  const echoed = graderCommandEvidence([{ name: 'bash', input: { command: `echo '${fetched}'` }, output: fetched }]);
+  assert.equal(echoed.untrusted, true);
+  assert.equal(echoed.commands[0].command, `echo '${fetched}'`);
+  for (const key of ['pass', 'score', 'violation']) assert.equal(Object.hasOwn(echoed.commands[0], key), false);
 });
 const pom = (version = '52', artifact = 'sling-bundle-parent', group = 'org.apache.sling') =>
   `<project><parent><groupId>${group}</groupId><artifactId>${artifact}</artifactId><version>${version}</version></parent></project>\n`;
@@ -174,6 +222,7 @@ test('workspace result retains actual edits, new files, skill reads and bounded 
     { name: 'bash', input: { command }, output: 'Release 99 ' + 'x'.repeat(5000) },
     { name: 'bash', input: { command: 'wget https://example.invalid/missing' }, is_error: true, output: '404' },
     { name: 'bash', input: { command: 'git diff --stat' }, output: '1 file changed' },
+    { name: 'bash', input: { command: 'cd /tmp/comparison && mvn clean package -DskipTests' }, output: 'comparison jar' },
   ];
   const skillCalls = [{ name: 'update-sling-parent-pom', is_error: false }, { name: 'other', is_error: true }];
   const response = await result(state, { toolCalls, skillCalls, turns: 4, tokenUsage: { total: 48 }, harness: 'pi' });
@@ -196,6 +245,8 @@ test('workspace result retains actual edits, new files, skill reads and bounded 
   assert.ok(output.sources[0].output.length < 4500);
   assert.equal(output.sources[1].is_error, true);
   assert.deepEqual(output.gitActions, { count: 1, truncated: false, commands: [{ command: 'git diff --stat', is_error: false }] });
+  assert.equal(output.commandEvidence.commands[0].command, 'cd /tmp/comparison && mvn clean package -DskipTests');
+  assert.equal(output.commandEvidence.untrusted, true);
   assert.equal(await fs.readFile(path.join(state.runDir, 'changes.patch'), 'utf8'), response.metadata.workspaceDiff);
   assert.equal(await fs.readFile(path.join(state.runDir, 'summary.txt'), 'utf8'), state.completion.summary);
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(state.runDir, 'completion.json'))), state.completion);

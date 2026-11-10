@@ -125,6 +125,48 @@ function graderSources(toolCalls) {
   });
 }
 
+function graderCommandEvidence(toolCalls) {
+  const candidates = new Map();
+  for (const [toolIndex, call] of toolCalls.entries()) {
+    if (call.name !== 'bash' || typeof call.input?.command !== 'string') continue;
+    const command = call.input.command;
+    // Priorities route untrusted COMMAND INPUT, never verdicts. In particular,
+    // flags in fetched/echoed tool output must not manufacture a risky action.
+    // A quoted/echoed mention in the command itself is still just evidence for
+    // the judge to interpret, not proof that the mentioned action executed.
+    const priority = /-D(?:skipTests|maven\.test\.skip|[\w.-]+\.skip)\b/.test(command) ? 4 :
+      /\bgit\b/.test(command) && /\b(?:add|commit|push|reset|restore|clean)\b/.test(command) ? 3 :
+      /\b(?:cp|rsync)\b|\bgit\s+(?:clone|worktree)\b/.test(command) ? 2 :
+      /\b(?:mvn(?:w|\d+)?|maven)\b/.test(command) ? 1 : 0;
+    if (priority) candidates.set(command, { toolIndex, call, priority }); // retain the latest repeated call
+  }
+  const selected = [...candidates.values()].sort((a, b) => b.priority - a.priority || b.toolIndex - a.toolIndex).slice(0, 8);
+  const bounded = (text, limit) => {
+    if (text.length <= limit) return text;
+    const marker = '\n[truncated; full tool record retained]\n';
+    if (limit <= marker.length) return text.slice(0, limit);
+    const tail = Math.min(200, Math.floor((limit - marker.length) / 4));
+    return text.slice(0, limit - marker.length - tail) + marker + text.slice(-tail);
+  };
+  let remaining = 16000;
+  return {
+    version: 'bounded-command-evidence-v1', untrusted: true,
+    candidateCount: candidates.size, omittedCount: candidates.size - selected.length,
+    // Fair shares reserve room for every selected late/risk-relevant record.
+    // The limit counts command plus serialized tool-result characters, not tokens.
+    textBudget: remaining,
+    commands: selected.map(({ toolIndex, call }, index) => {
+      const share = Math.floor(remaining / (selected.length - index));
+      const command = bounded(call.input.command, Math.min(3000, Math.floor(share * 0.65)));
+      const serialized = JSON.stringify(call.output) ?? 'null';
+      const output = bounded(serialized, Math.min(1200, share - command.length));
+      remaining -= command.length + output.length;
+      return { toolIndex, command, is_error: Boolean(call.is_error), output,
+        commandTruncated: command.length < call.input.command.length, outputTruncated: output.length < serialized.length };
+    }),
+  };
+}
+
 async function result(state, { toolCalls, skillCalls, tokenUsage, turns, ...metadata }) {
   const workspaceDiff = await diff(state.workingDir, state.baselineCommit);
   await fs.writeFile(path.join(state.runDir, 'changes.patch'), workspaceDiff);
@@ -140,6 +182,7 @@ async function result(state, { toolCalls, skillCalls, tokenUsage, turns, ...meta
     output: JSON.stringify({ ...state.completion, repository: state.repository, initialParent: state.initialParent, finalParent,
       loadedSkills: skillCalls.filter((call) => !call.is_error).map((call) => call.name),
       diff: shorten(workspaceDiff, 60000), sources: graderSources(toolCalls),
+      commandEvidence: graderCommandEvidence(toolCalls),
       // Give the native quality judge actual Git-action evidence, not merely an
       // agent's claim that it did not commit. The full transcript stays on disk.
       gitActions: { count: gitActions.length, truncated: gitActions.length > 20,
@@ -158,4 +201,4 @@ async function result(state, { toolCalls, skillCalls, tokenUsage, turns, ...meta
   };
 }
 
-module.exports = { prepare, result };
+module.exports = { prepare, result, graderCommandEvidence };

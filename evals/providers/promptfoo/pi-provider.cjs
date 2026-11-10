@@ -4,6 +4,7 @@ const path = require('node:path');
 const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { prepare, result } = require('./workspace.cjs');
+const { boundaryVersion } = require('./file-boundary.cjs');
 
 const exec = promisify(execFile);
 const providerId = 'apache-evals';
@@ -55,6 +56,8 @@ async function configure(state) {
     maxTurns: config.maxTurns ?? 80, maxTextOnlyTurns: config.maxTextOnlyTurns ?? 3,
     maxToolRepeats: config.maxToolRepeats ?? 3,
     commandTimeoutMs: config.mavenTimeoutMs ?? 1200000,
+    fileBoundary: state.fileBoundary = { version: boundaryVersion, projectRoot: state.workingDir,
+      skillRoots: state.skills.map(skill => skill.directory) },
   }));
   return agentDir;
 }
@@ -68,6 +71,7 @@ function instructions() {
     'Use bash to inspect the Java/Maven environment and validate changes. Preserve the current Java environment.',
     'Do not publish, release, stage, commit, push, disable checks, skip tests, or make unrelated changes.',
     'Load relevant skill instructions with read on the entire SKILL.md (no offset or limit), not bash, so skill use can be audited. Read supporting references as needed.',
+    'Native file tools are confined to the project and explicitly advertised copied skills; copied skills and Git metadata are read-only. Do not search for host skills or use bash to circumvent these boundaries.',
     'Plain text is progress narration, NOT completion. Keep using tools until finished or genuinely blocked.',
     'End by calling finish_task ALONE, with status completed or blocked and an honest summary. Never promise future actions in a completion summary.',
   ].join('\n');
@@ -145,7 +149,7 @@ async function collect(state, tokenUsage) {
   let recoveryPending = false;
   let recoveringCall;
   let abortTail = false;
-  const diagnostics = state.diagnostics = { requests: [], modelCalls: [], compactions: [] };
+  const diagnostics = state.diagnostics = { requests: [], modelCalls: [], compactions: [], fileBoundaryDenials: [] };
   const addUsage = (usage = {}) => {
     tokenUsage.prompt += (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
     tokenUsage.completion += usage.output ?? 0;
@@ -154,6 +158,14 @@ async function collect(state, tokenUsage) {
     tokenUsage.completionDetails.reasoning += usage.reasoning ?? 0;
   };
   for await (const event of events(path.join(state.runDir, 'pi-events.jsonl'))) {
+    if (event.type === 'entry_appended' && event.entry?.type === 'custom') {
+      if (event.entry.customType === 'eval-controls') diagnostics.controls = event.entry.data;
+      if (event.entry.customType === 'eval-file-boundary') diagnostics.fileBoundaryDenials.push(event.entry.data);
+      if (event.entry.customType === 'eval-file-access') {
+        const record = pending.get(event.entry.data?.toolCallId);
+        if (record) record.resolvedPath = event.entry.data.path;
+      }
+    }
     if (event.type === 'entry_appended' && event.entry?.type === 'custom' && event.entry.customType === 'eval-request') {
       diagnostics.requests.push(event.entry.data);
     }
@@ -199,10 +211,17 @@ async function collect(state, tokenUsage) {
         is_error: Boolean(event.isError), durationMs: event.durationMs });
       toolCalls.push(record);
       if (record.name === 'read' && typeof record.input?.path === 'string') {
-        const file = path.resolve(state.workingDir, record.input.path);
+        const file = record.resolvedPath ?? path.resolve(state.workingDir, record.input.path);
         const skill = state.skills.find((item) => file === path.join(item.directory, 'SKILL.md'));
         if (skill && (record.input.offset ?? 1) === 1 && record.input.limit === undefined) {
           skillCalls.push({ name: skill.name, is_error: record.is_error });
+        } else if (!skill && path.basename(file) === 'SKILL.md') {
+          // Ambient discovery is disabled, but native tools are not a filesystem
+          // sandbox. A host skill read is exposure even when it is only partial;
+          // never silently count it as a clean no-skills baseline or as the
+          // explicitly installed skill required by the skills arm.
+          skillCalls.push({ name: path.basename(path.dirname(file)), is_error: record.is_error,
+            installed: false, path: file, offset: record.input.offset, limit: record.input.limit });
         }
       }
     }
@@ -284,7 +303,8 @@ module.exports = class PiProvider {
         model: this.config.model, apiBaseUrl: this.config.apiBaseUrl,
         temperature: this.config.temperature ?? 0, maxTokens: this.config.maxTokens ?? 8192,
         contextWindow: this.config.contextWindow, chatTemplateKwargs: this.config.chatTemplateKwargs,
-        piCompaction: compactionSettings(this.config), diagnostics: state.diagnostics });
+        piCompaction: compactionSettings(this.config), diagnostics: state.diagnostics,
+        harnessControls: { nativeFileBoundary: state.fileBoundary } });
     } catch (error) {
       const message = `${error.message}${state?.runDir ? `; artifacts: ${state.runDir}` : ''}`;
       if (state?.runDir) {
@@ -295,7 +315,8 @@ module.exports = class PiProvider {
       }
       return { error: message, cached: false, tokenUsage,
         metadata: { runDir: state?.runDir, repository: state?.repository,
-          baselineCommit: state?.baselineCommit, diagnostics: state?.diagnostics } };
+          baselineCommit: state?.baselineCommit, diagnostics: state?.diagnostics,
+          harnessControls: { nativeFileBoundary: state?.fileBoundary } } };
     }
   }
 };

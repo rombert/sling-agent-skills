@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { createBashToolDefinition, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { toolKey } from './tool-key.cjs';
+import { createFileBoundary } from './file-boundary.cjs';
 
 const exec = promisify(execFile);
 
@@ -44,11 +45,14 @@ export default function (pi: ExtensionAPI) {
   const repeats = new Map<string, number>();
   let fingerprint: string;
   let stalled: string | undefined;
+  let boundary: Awaited<ReturnType<typeof createFileBoundary>>;
+  let controlsRecorded = false;
 
   pi.on('session_start', async (_event, ctx) => {
+    boundary = await createFileBoundary(config.fileBoundary, ctx.cwd);
     fingerprint = await workspaceFingerprint(ctx.cwd);
   });
-  pi.on('tool_call', (event) => {
+  pi.on('tool_call', async (event) => {
     if (stalled) return { block: true, reason: stalled };
     const key = toolKey(event.toolName, event.input);
     const count = (repeats.get(key) ?? 0) + 1;
@@ -57,6 +61,19 @@ export default function (pi: ExtensionAPI) {
       stalled = `Repeated ${event.toolName} with identical arguments more than ${config.maxToolRepeats} times without edits; stopping a stalled tool loop.`;
       pi.appendEntry('eval-stall', { tool: event.toolName, input: event.input, count });
       return { block: true, reason: stalled };
+    }
+    // Supported Pi preflight hook: the native tool has not executed yet.
+    // Fail closed if session initialization did not establish the boundary.
+    if (!boundary) return { block: true, reason: 'Native file boundary is not initialized' };
+    const access = await boundary.check(event.toolName, event.input);
+    if (access && !access.allowed) {
+      pi.appendEntry('eval-file-boundary', { tool: event.toolName,
+        path: (event.input as { path?: string }).path, reason: access.reason });
+      return { block: true, reason: access.reason };
+    }
+    if (access) {
+      (event.input as { path: string }).path = access.path;
+      pi.appendEntry('eval-file-access', { toolCallId: event.toolCallId, path: access.path });
     }
   });
   pi.on('tool_result', async (event, ctx) => {
@@ -69,6 +86,12 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on('before_provider_request', (event, ctx) => {
+    // Pi JSON subscribers are not attached yet at session_start. Emit the
+    // initialized policy here so the native JSON transcript retains the ack.
+    if (boundary && !controlsRecorded) {
+      pi.appendEntry('eval-controls', { nativeFileBoundary: boundary.policy });
+      controlsRecorded = true;
+    }
     const payload = event.payload as Record<string, unknown>;
     // Audit effective limits, not prompts, headers, or credentials. Pi may clamp
     // max_tokens below the configured model limit as context grows.

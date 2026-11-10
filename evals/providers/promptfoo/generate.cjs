@@ -24,7 +24,8 @@ async function generate({ scenarios, arm, output }) {
   const config = {
     description: template.description,
     prompts: ['{{task}}'], providers, evaluateOptions: template.evaluateOptions,
-    defaultTest: { options: { provider: { id: `litellm:${models.grading.model}`, config: { apiBaseUrl: models.apiBaseUrl } } } },
+    defaultTest: { options: { provider: { id: `litellm:${models.grading.model}`,
+      config: { apiBaseUrl: models.apiBaseUrl, maxRetries: 0 } } } },
     tests: scenarios.map((scenario) => ({ description: scenario.id,
       vars: { task: scenario.prompt, scenario },
       assert: [assertion('ParentUpgrade', 'parent-upgrade.cjs'), assertion('SkillUsage', 'skill-usage.cjs'),

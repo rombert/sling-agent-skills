@@ -1,15 +1,18 @@
 """Offline native Inspect tests: local HTTP model, fake fixtures/builds, real tools/logs."""
 
 import asyncio
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
+from io import StringIO
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
 from threading import Thread
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -17,6 +20,7 @@ from inspect_ai import eval_async
 
 from runtime import Runtime, bridge, child_environment, grading_evidence, install_skills
 from tasks import build_task, model_for, parse_verdict
+from report import SCORERS, error_summary, summarize, validate_config
 
 HERE = Path(__file__).resolve().parent
 
@@ -36,7 +40,7 @@ def mock_endpoint(mode="completed"):
                 self.send_response(429)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(b'{"error":{"message":"Test rate limit","type":"rate_limit_error"}}')
+                self.wfile.write(b'{"error":{"message":"Test rate limit","type":"rate_limit_error","api_key":"test-credential-hash-never-print"}}')
                 return
             message = {"role": "assistant", "content": ""}
             if body["model"] == "gemma4-26b":
@@ -124,8 +128,10 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_filter_paths_edits_and_repetition(self):
         self.assertEqual(child_environment({"PATH": "/bin", "LITELLM_API_KEY": "secret", "OPENAI_API_KEY": "secret",
-                         "GIT_DIR": "elsewhere", "MAVEN_REPOSITORY_TOKEN": "needed"}),
-                         {"PATH": "/bin", "MAVEN_REPOSITORY_TOKEN": "needed"})
+                         "GIT_DIR": "elsewhere", "MAVEN_REPOSITORY_TOKEN": "needed",
+                         "MAVEN_ARGS": "--settings /private/settings.xml", "MAVEN_OPTS": "-Dmaven.repo.local=/private/repository"}),
+                         {"PATH": "/bin", "MAVEN_REPOSITORY_TOKEN": "needed", "MAVEN_ARGS": "--settings /private/settings.xml",
+                          "MAVEN_OPTS": "-Dmaven.repo.local=/private/repository"})
         read, edit, _ = self.runtime.tools()
         for _ in range(3):
             self.assertEqual(await read("pom.xml"), "34")
@@ -183,6 +189,89 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evidence["gitActions"]["count"], 1)
 
 
+class ReportTests(unittest.TestCase):
+    def setUp(self):
+        self.sample_config = {"id": "scenario--with-skills", "arm": "with-skills", "scenario": {"id": "scenario", "pin": "original"}}
+        self.config = {"schemaVersion": 1, "samples": [self.sample_config]}
+        call = SimpleNamespace(id="submit-1", function="finish_task", arguments={"status": "completed", "summary": "Done"})
+        self.sample = SimpleNamespace(id=self.sample_config["id"], epoch=1, error=None,
+                                      metadata={"sample": deepcopy(self.sample_config), "runDir": "/retained/run",
+                                                "evaluation": {"completion": {"status": "completed"}}},
+                                      scores={name: SimpleNamespace(value=1) for name in SCORERS},
+                                      messages=[SimpleNamespace(role="assistant", tool_calls=[call]),
+                                                SimpleNamespace(role="tool", function="finish_task", tool_call_id="submit-1", error=None)])
+        self.log = SimpleNamespace(status="success", error=None, location="/retained/native.eval", samples=[self.sample],
+                                   eval=SimpleNamespace(eval_id="eval-1", run_id="run-1"))
+
+    def test_exact_identity_epochs_scorers_and_completion_fail_closed(self):
+        from runner import exit_code
+        self.assertEqual(exit_code([self.log], self.config), 0)
+        self.assertEqual(exit_code([self.log], self.config, 2), 1)
+        mutations = [lambda s: setattr(s, "id", "wrong-slot"), lambda s: setattr(s, "epoch", 2),
+                     lambda s: s.scores.pop("JavaTarget"),
+                     lambda s: s.scores.update({"WrongScorer": s.scores.pop("JavaTarget")}),
+                     lambda s: setattr(s.scores["UpgradeQuality"], "value", 0),
+                     lambda s: s.metadata["sample"]["scenario"].update(pin="different"),
+                     lambda s: s.metadata["evaluation"]["completion"].update(status="blocked"),
+                     lambda s: s.messages.pop(),
+                     lambda s: setattr(s.messages[-1], "tool_call_id", "wrong-id"),
+                     lambda s: s.messages[0].tool_calls[0].arguments.update(status="blocked")]
+        for mutate in mutations:
+            log = deepcopy(self.log)
+            mutate(log.samples[0])
+            with self.subTest(mutation=mutate):
+                self.assertEqual(exit_code([log], self.config), 1)
+        self.assertEqual(exit_code([], self.config), 1)
+        self.assertEqual(exit_code([self.log, self.log], self.config), 1)
+
+    def test_duplicate_cannot_replace_missing_slot_at_same_count(self):
+        self.config["samples"].append({"id": "scenario--without-skills", "arm": "without-skills", "scenario": {"id": "scenario"}})
+        self.log.samples.append(deepcopy(self.sample))
+        report = summarize([self.log], self.config)
+        self.assertFalse(report["allPassed"])
+        self.assertEqual(report["outcomes"], {"duplicate": 1, "missing": 1})
+
+    def test_interrupted_log_retains_passes_and_errors_without_claiming_complete(self):
+        self.log.status = "started"
+        report = summarize([self.log], self.config, 2)
+        self.assertFalse(report["allPassed"])
+        self.assertEqual(report["outcomes"], {"pass": 1, "missing": 1})
+        self.sample.error = SimpleNamespace(message='RateLimitError: Error code: 429 {"api_key":"never-print-hash"}')
+        report = summarize([self.log], self.config)
+        self.assertEqual(report["slots"][0]["outcome"], "error")
+        self.assertEqual(report["slots"][0]["records"][0]["error"], {"type": "RateLimitError", "httpStatus": 429})
+        self.assertNotIn("never-print", json.dumps(report))
+        self.assertEqual(error_summary(SimpleNamespace(message="APIConnectionError: private body"))["type"], "APIConnectionError")
+
+    def test_invalid_or_duplicate_config_rejected_before_execution(self):
+        with self.assertRaises(ValueError):
+            validate_config(self.config, 0)
+        self.config["samples"].append(deepcopy(self.sample_config))
+        with self.assertRaisesRegex(ValueError, "Duplicate"):
+            validate_config(self.config, 1)
+
+    def test_runner_is_serial_retry_free_fail_fast_and_writes_coverage(self):
+        from runner import main
+        with tempfile.TemporaryDirectory(prefix="sling-inspect-report-", dir="/tmp/opencode") as directory:
+            root = Path(directory)
+            config = {**self.config, "models": {}}
+            path = root / "config.json"
+            path.write_text(json.dumps(config))
+            args = ["runner.py", "--config", str(path), "--log-dir", str(root)]
+            with patch("sys.argv", args), patch("runner.build_task"), patch("runner.model_for"), \
+                    patch("runner.eval", return_value=[self.log]) as evaluate, redirect_stdout(StringIO()):
+                self.assertEqual(main(), 0)
+            kwargs = evaluate.call_args.kwargs
+            self.assertTrue(kwargs["fail_on_error"])
+            self.assertEqual(kwargs["retry_on_error"], 0)
+            self.assertEqual([kwargs[key] for key in ["max_samples", "max_tasks", "max_connections"]], [1, 1, 1])
+            self.assertEqual(kwargs["display"], "none")
+            self.assertFalse(kwargs["log_model_api"])
+            self.assertTrue(kwargs["log_realtime"])
+            self.assertEqual(kwargs["log_buffer"], 1)
+            self.assertTrue(json.loads((root / "coverage-eval-1.json").read_text())["allPassed"])
+
+
 class NativeInspectTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         asyncio.get_running_loop().slow_callback_duration = 10
@@ -199,7 +288,7 @@ class NativeInspectTests(unittest.IsolatedAsyncioTestCase):
                     "criteria": [{"id": "quality", "description": "SECRET-GRADING-CRITERIA"}],
                     "checks": [{"type": "pom_parent", "expected": {"group_id": "org.apache.sling", "artifact_id": "sling-bundle-parent", "version": "46"}}]}
         for arm in ["with-skills", "without-skills"]:
-            self.config["samples"].append({"id": f"mock--{arm}", "arm": arm, "scenario": deepcopy(scenario)})
+            self.config["samples"].append({"id": f"mock-scenario--{arm}", "arm": arm, "scenario": deepcopy(scenario)})
         self.bridge_calls = []
         self.prepared = []
 
@@ -227,12 +316,12 @@ class NativeInspectTests(unittest.IsolatedAsyncioTestCase):
         patch.dict(os.environ, {"LITELLM_API_KEY": "local-test-secret", "OPENAI_API_KEY": "other-test-secret",
                               "INSPECT_WORKSPACE_ROOT": str(self.root), "GIT_DIR": "/not-the-project"}).start()
 
-    async def evaluate(self, endpoint, epochs=1):
+    async def evaluate(self, endpoint, epochs=1, fail_on_error=False):
         self.config["models"]["apiBaseUrl"] = endpoint
         # A future change must not silently add Inspect's CLI dotenv loading.
         with patch("dotenv.load_dotenv", side_effect=AssertionError("No implicit dotenv loading")):
             logs = await eval_async(build_task(self.config), model=model_for(self.config["models"], "coding"),
-                                    epochs=epochs, max_samples=1, max_tasks=1, max_connections=1, fail_on_error=False,
+                                    epochs=epochs, max_samples=1, max_tasks=1, max_connections=1, fail_on_error=fail_on_error,
                                     retry_on_error=0, log_dir=str(self.root / "logs"), log_model_api=False, cache=False)
         self.assertEqual(len(logs), 1)
         return logs[0]
@@ -269,12 +358,25 @@ class NativeInspectTests(unittest.IsolatedAsyncioTestCase):
         reloaded = read_eval_log(str(native_logs[0]))
         self.assertEqual(len(reloaded.samples), 4)
         self.assertNotIn("local-test-secret", reloaded.model_dump_json())
+        # Reporting a retained native log must not rewrite or rescore it.
+        from report import main as report_main
+        config_path = self.root / "config.json"
+        config_path.write_text(json.dumps(self.config))
+        report_path = self.root / "offline-report.json"
+        original_digest = hashlib.sha256(native_logs[0].read_bytes()).digest()
+        args = ["report.py", "--config", str(config_path), "--runs", "2", "--log", str(native_logs[0]), "--output", str(report_path)]
+        with patch("sys.argv", args), redirect_stdout(StringIO()):
+            self.assertEqual(report_main(), 0)
+        self.assertTrue(json.loads(report_path.read_text())["allPassed"])
+        self.assertEqual(hashlib.sha256(native_logs[0].read_bytes()).digest(), original_digest)
+        with patch("sys.argv", args), self.assertRaises(FileExistsError):
+            report_main()
         from runner import exit_code
-        self.assertEqual(exit_code([log], 4), 0)
-        self.assertEqual(exit_code([log], 5), 1)
-        self.assertEqual(exit_code([], 4), 1)
+        self.assertEqual(exit_code([log], self.config, 2), 0)
+        self.assertEqual(exit_code([log], self.config, 3), 1)
+        self.assertEqual(exit_code([], self.config), 1)
         log.samples[0].scores["ParentUpgrade"].value = 0
-        self.assertEqual(exit_code([log], 4), 1)
+        self.assertEqual(exit_code([log], self.config, 2), 1)
 
     async def test_native_summary_compaction_usage_is_retained(self):
         self.config["samples"] = self.config["samples"][1:]
@@ -320,6 +422,50 @@ class NativeInspectTests(unittest.IsolatedAsyncioTestCase):
         sample = log.samples[0]
         self.assertIsNotNone(sample.error)
         self.assertTrue((Path(sample.metadata["runDir"]) / "error.json").exists())
+        error = json.loads((Path(sample.metadata["runDir"]) / "error.json").read_text())
+        self.assertEqual(error, {"type": "RateLimitError", "httpStatus": 429})
+        self.assertNotIn("test-credential-hash", json.dumps(error))
+        report = summarize([log], self.config)
+        self.assertEqual(report["outcomes"], {"error": 1})
+        self.assertNotIn("test-credential-hash", json.dumps(report))
+        self.assertEqual(sample.metadata["evaluation"]["completion"]["status"], "incomplete")
+
+    async def test_runner_fail_fast_retains_cancellation_without_more_model_requests(self):
+        with mock_endpoint("error") as (endpoint, requests):
+            log = await self.evaluate(endpoint, fail_on_error=True)
+        self.assertEqual(len(requests), 1)
+        report = summarize([log], self.config)
+        self.assertFalse(report["allPassed"])
+        self.assertEqual(report["outcomes"], {"error": 1, "cancelled": 1})
+
+    async def test_real_runner_retains_native_error_but_only_prints_redacted_coverage(self):
+        from runner import main
+        with mock_endpoint("error") as (endpoint, requests):
+            self.config["models"]["apiBaseUrl"] = endpoint
+            config = self.root / "config.json"
+            config.write_text(json.dumps(self.config))
+            output = StringIO()
+            with patch("sys.argv", ["runner.py", "--config", str(config), "--log-dir", str(self.root / "logs")]), \
+                    redirect_stdout(output):
+                code = await asyncio.to_thread(main)
+        self.assertEqual(code, 1)
+        self.assertEqual(len(requests), 1)
+        self.assertNotIn("test-credential-hash", output.getvalue())
+        reports = list((self.root / "logs").glob("coverage-*.json"))
+        self.assertEqual(len(reports), 1)
+        report = json.loads(reports[0].read_text())
+        self.assertEqual(report["outcomes"], {"error": 1, "cancelled": 1})
+        self.assertEqual(report["slots"][0]["records"][0]["error"], {"type": "RateLimitError", "httpStatus": 429})
+        journals = list((self.root / "logs").glob("progress-*.jsonl"))
+        self.assertEqual(len(journals), 1)
+        text = journals[0].read_text()
+        self.assertNotIn("test-credential-hash", text)
+        events = [json.loads(line) for line in text.splitlines()]
+        self.assertEqual(events[0]["event"], "evaluation_start")
+        self.assertTrue(any(event["event"] == "sample_start" for event in events))
+        endings = [event for event in events if event["event"] == "sample_end"]
+        self.assertEqual({event["outcome"] for event in endings}, {"error", "cancelled"})
+        self.assertEqual(events[-1]["event"], "run_end")
 
     async def test_timeout_and_invalid_judge_fail_closed(self):
         self.config["samples"] = self.config["samples"][1:]

@@ -184,7 +184,8 @@ audits remain separate report fields.
 The run exits nonzero for missing/partial native assessments, any failed shared
 check, missing/failed activation evidence, incomplete coverage, or collection
 errors; a completed job alone does not imply a passing evaluation. Collection
-errors can be fixed and re-run locally without submitting another solve or judge.
+can be resumed explicitly without submitting another solve or judge; do not use
+the paid runner to bypass a completed batch's submission ledger.
 Each generation retains its own `manifest.json` as well as the latest pointer.
 Collection verifies and uses that generation's frozen `criteria.json`, not the
 current generator's rubric. Later rubric changes cannot reinterpret old scores.
@@ -237,8 +238,20 @@ The adapter collects completed-run solutions automatically. These read-only
 commands are also available for manual inspection or verification:
 
 ```sh
-# Recollect a completed run, without submitting another solve or judge:
+# First collection of a completed run, without another solve or judge:
 TESSL_MANIFEST=/path/to/generation/manifest.json RUNS=1 \
+  node evals/providers/tessl/collect.cjs
+
+# Subsequent collection requires explicit resume. Check existing CLI access
+# before allowing downloads; stop if this reports that login is needed.
+tessl whoami
+TESSL_MANIFEST=/path/to/generation/manifest.json RUNS=1 TESSL_COLLECT_RESUME=1 \
+  node evals/providers/tessl/collect.cjs
+
+# No remote calls or new builds: audit retained native evidence and reuse
+# checksum-matching completed receipts. Missing executable outcomes stay missing.
+TESSL_MANIFEST=/path/to/generation/manifest.json RUNS=1 \
+  TESSL_COLLECT_RESUME=1 TESSL_COLLECT_OFFLINE=1 \
   node evals/providers/tessl/collect.cjs
 
 tessl eval list-solutions <run-id> --json
@@ -248,6 +261,76 @@ tessl eval download-solutions <run-id> --output target/evals/tessl/solutions
 SCENARIO=<scenario-id> TESSL_SOLUTION_DIR=/path/to/full/solution \
   node evals/providers/tessl/verify.cjs
 ```
+
+### Incremental collection and safe resume
+
+Before downloading anything, the collector checkpoints every native slot's
+frozen-rubric grade and activation audit. It checkpoints download and verification
+transitions separately. A failed view/download leaves a nonpassing report with
+explicit missing coverage; the first download failure stops further remote reads,
+not an authentication/network retry loop. `coverage.nativeComplete` means every
+native slot is present; `coverage.complete` additionally requires a completed
+independent executable result for each slot. A pending/error result is never a
+pass, even with a perfect native score.
+
+`verification-report.json` is the atomic latest snapshot. Immutable
+`collection/<collection-id>/report-*.json` snapshots retain earlier progress,
+and `prior-report.json` retains the previous aggregate. Download attempts use
+new collection-owned directories; verification attempts use new
+`verification/<solution-id>/attempt-*` clones. No prior download or build is
+overwritten. A generation-local `.collection.lock` prevents overlapping collection;
+after a crash, inspect the lock and any in-progress build before an operator
+removes a stale lock. Do not delete the submission ledger.
+
+`TESSL_COLLECT_RESUME=1` reuses completed results, **including completed failures**,
+only when frozen input hashes, manifest/run selection, native-view hashes,
+verifier/shared-check/dependency-lock hashes, imported-source snapshot hashes,
+and the retained verification-result checksum match. Snapshot hashes cover file
+contents, paths and executable bits, excluding the same Git/harness/build paths
+as import. Resume refuses changed evidence instead of silently rebuilding it.
+Completed receipts survive interruption while revisiting other slots. A prior
+verification exception/in-progress attempt requires operator review and is not
+automatically rerun. Explicit resume can retry an incomplete download once access
+is restored; never repeatedly invoke it against an unresolved login/network error.
+
+New receipts also checksum the verifier's own `verification.json`, scenario and
+repository metadata, runtime/cache/version evidence, `scenario-checks.json`, the
+Maven build log and retained effective-POM/comparison/log files. Mutation or
+removal of a bound supporting file fails resume without rebuilding. Successful
+checks require their supporting files; an early executable rejection binds only
+the evidence actually produced and does not invent an unexecuted build. The
+collector accepts any positive safe-integer repetition count, matching common
+`RUNS` parsing; collection imposes no ten-repetition submission limit.
+
+Pre-checkpoint evidence is not automatically trusted. For a reviewed legacy
+attempt, `TESSL_LEGACY_EVIDENCE=/path/to/mapping.json` accepts a JSON object mapping
+solution IDs to their original `verification.json` paths. The read-only adopter
+requires matching frozen scenario/check policy, source pin, prepared baseline,
+downloaded/imported source snapshots, exact retained check coverage, effective
+compiler targets and Maven log outcome. It rechecks non-command artifacts but
+does **not** rerun Maven, edit old evidence, reinterpret native scores, or repair
+a failure. Its supporting evidence checksums are retained for subsequent resume.
+A historical aggregate cannot be silently overwritten and rebuilt without this
+explicit review.
+
+Independent verification selects Java 21 for both `java` and Maven (default
+`/usr/lib64/jvm/java-21-openjdk`; override with `TESSL_VERIFY_JAVA_HOME`). It records
+the runtime/cache configuration in `verification-runtime.json`. Maven uses
+provider-owned settings and a writable cache under the generation's
+`verification-maven/`; standalone verification uses its own attempt's `maven/`.
+There are no mutable hardlinks to `~/.m2` and no cross-provider cache contention.
+The catalog's build command, exact assertions and 1,200-second timeout are unchanged.
+
+Full-batch collection is now complete: **10 native slots, 7 perfect native
+scores, 10 matching activation audits; 9 independent PASS, 1 preserved FAIL,
+0 missing executable outcomes**. After the user restored login, all nine missing
+downloads/builds completed, without a new solve, rescore, submission or retry of
+the original failure. A subsequent fully offline resume reused all ten outcomes
+and checked all **121 supporting-file hashes**. Combined native/executable/
+activation policy passes **6/10** slots; the overall evaluation remains
+nonpassing because the original executable failure and all three native
+deductions remain. See [VALIDATION.md](VALIDATION.md) for per-slot outcomes,
+retained checkpoints and the cost-free offline resume command.
 
 Keep native judge results and independently reproduced build outcomes separate.
 The verification command reconstructs the prepared baseline, imports the full

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const http = require('node:http');
+const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { test } = require('node:test');
@@ -59,13 +60,13 @@ fs.writeFileSync(path.join(root, 'invocation.json'), JSON.stringify({ args, agen
 const emit = (event) => console.log(JSON.stringify(event));
 const usage = { input: 10, output: 2, totalTokens: 12 };
 let index = 0;
-const call = (name, input, output = {}) => {
+const call = (name, input, output = {}, isError = false) => {
   const id = 'call-' + index++;
   emit({ type: 'turn_start' });
   emit({ type: 'message_update', usage, assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Narration' } });
   emit({ type: 'message_end', message: { role: 'assistant', usage, stopReason: 'toolUse' } });
   emit({ type: 'tool_execution_start', toolCallId: id, toolName: name, args: input });
-  emit({ type: 'tool_execution_end', toolCallId: id, toolName: name, result: output, isError: false });
+  emit({ type: 'tool_execution_end', toolCallId: id, toolName: name, result: output, isError });
 };
 emit({ type: 'session' });
 if (scenario === 'timeout') { setInterval(() => {}, 1000); }
@@ -93,6 +94,10 @@ else {
     emit({ type: 'compaction_end', reason: 'threshold', result, aborted: false, willRetry: false });
   }
   if (args.includes('--skill')) call('read', { path: path.join(args[args.indexOf('--skill') + 1], 'update-sling-parent-pom', 'SKILL.md') });
+  if (scenario.startsWith('ambient-')) call('read', {
+    path: '/host/cache/skills/update-sling-parent-pom/SKILL.md',
+    ...(scenario === 'ambient-partial-skill' ? { offset: 2, limit: 3 } : {}),
+  }, {}, scenario === 'ambient-failed-skill');
   fs.writeFileSync('pom.xml', fs.readFileSync('pom.xml', 'utf8').replace('<version>52</version>', '<version>99</version>'));
   call('edit', { path: 'pom.xml' });
   call('bash', { command: 'curl https://example.invalid/metadata' }, { content: [{ type: 'text', text: 'Release 99' }] });
@@ -181,6 +186,24 @@ test('Pi uses the corrected context and default compaction budgets with thinking
   assert.deepEqual(result.metadata.chatTemplateKwargs, { enable_thinking: true });
   const controls = JSON.parse(await fs.readFile(path.join(agentDir, 'eval.json')));
   assert.equal(controls.maxToolRepeats, 3);
+});
+
+test('Pi audits successful host skill reads as contaminated in either arm, including partial reads', async (t) => {
+  const { config } = await fixture(t);
+  for (const install_skills of [true, false]) {
+    for (const scenario of ['ambient-skill', 'ambient-partial-skill', 'ambient-failed-skill']) {
+      setEnv(t, 'TEST_PI_SCENARIO', scenario);
+      const result = await new Provider({ config: { ...config, install_skills } }).callApi('Upgrade');
+      assert.equal(result.error, undefined);
+      const ambient = result.metadata.skillCalls.filter(call => call.installed === false);
+      assert.equal(ambient.length, 1);
+      assert.equal(ambient[0].path, '/host/cache/skills/update-sling-parent-pom/SKILL.md');
+      const grade = skillGrade('', { providerResponse: result });
+      assert.equal(grade.pass, scenario === 'ambient-failed-skill');
+      if (!grade.pass) assert.match(grade.reason, /arm contaminated/);
+      if (scenario === 'ambient-partial-skill') assert.equal(ambient[0].limit, 3);
+    }
+  }
 });
 
 test('Pi requires explicit model context even with compaction disabled', async (t) => {
@@ -412,6 +435,62 @@ test('installed Pi uses native tools and the configured request settings', {
     assert.match(JSON.stringify(JSON.parse(result.output).sources), /Latest release: 99/);
   }
   assert.equal(await fs.readFile(path.join(source, 'pom.xml'), 'utf8'), pom);
+
+  // Replay the observed host skill paths through REAL Pi tools. The preflight
+  // hook must deny them before content is returned in either arm. A synthetic
+  // existing host skill supplies a sentinel proving this is not just ENOENT.
+  const hostSkills = await fs.mkdtemp('/tmp/opencode/pi-host-skills-test-');
+  t.after(() => fs.rm(hostSkills, { recursive: true, force: true }));
+  const hostSkill = path.join(hostSkills, 'SKILL.md');
+  const sentinel = 'HOST_BOUNDARY_SECRET_DO_NOT_RETURN';
+  await fs.writeFile(hostSkill, sentinel);
+  for (const install_skills of [true, false]) {
+    requests = [];
+    let installedSkill;
+    const skillTools = {};
+    Object.defineProperty(skillTools, 'tool_calls', { enumerable: true, get() {
+      const match = JSON.stringify(requests[0].body.messages).match(/\/[^\s<>"\\]*\/skills\/update-sling-parent-pom\/SKILL\.md/);
+      if (install_skills) {
+        assert.ok(match, 'private skill advertised');
+        installedSkill = match[0];
+        return tool(['read', { path: '@' + installedSkill }],
+          ['edit', { path: installedSkill, oldText: 'name:', newText: 'MUTATED:' }],
+          ['write', { path: installedSkill, content: 'MUTATED SKILL' }]).tool_calls;
+      }
+      return tool(['write', { path: hostSkill, content: 'MUTATED SKILL' }]).tool_calls;
+    } });
+    responses = [
+      tool(['read', { path: path.join(os.homedir(), '.cache/copilot/marketplaces/apache--sling-agent-skills/skills/update-sling-parent-pom/SKILL.md'), offset: 2, limit: 3 }],
+        ['read', { path: path.join(projectRoot, 'skills/update-sling-parent-pom/SKILL.md') }],
+        ['read', { path: hostSkill }],
+        ['grep', { path: hostSkills, pattern: 'PRIVATE' }],
+        ['find', { path: hostSkills, pattern: '*' }], ['ls', { path: hostSkills }]),
+      tool(['read', { path: '@pom.xml' }],
+        ['write', { path: 'boundary-new.txt', content: 'project write allowed' }],
+        ['edit', { path: 'pom.xml', oldText: '<version>52</version>', newText: '<version>99</version>' }],
+        ['grep', { pattern: 'project' }], ['find', { pattern: 'pom.xml' }], ['ls', {}]),
+      skillTools,
+      tool(['write', { path: '.git/config', content: 'MUTATED GIT METADATA' }]),
+      tool(['finish_task', { status: 'completed', summary: 'Native file boundary verified.' }]),
+    ];
+    const bounded = await evaluate({ install_skills });
+    assert.equal(bounded.error, undefined, bounded.error);
+    const calls = bounded.metadata.toolCalls;
+    assert.ok(calls.slice(0, 6).every(call => call.is_error));
+    for (const call of calls.slice(0, 6)) assert.match(JSON.stringify(call.output), /Native file boundary/);
+    assert.ok(calls.slice(6, 12).every(call => !call.is_error), 'normal native project tools remain usable');
+    assert.equal(await fs.readFile(path.join(bounded.metadata.workingDir, 'boundary-new.txt'), 'utf8'), 'project write allowed');
+    assert.match(await fs.readFile(path.join(bounded.metadata.workingDir, 'pom.xml'), 'utf8'), /<version>99<\/version>/);
+    assert.equal((await parentGrade('', { providerResponse: bounded })).pass, true);
+    assert.equal(skillGrade('', { providerResponse: bounded }).pass, true, 'blocked host reads are not successful exposure');
+    assert.equal(bounded.metadata.harnessControls.nativeFileBoundary.version, 'native-file-boundary-v1');
+    assert.equal(bounded.metadata.diagnostics.controls.nativeFileBoundary.bashConfined, false);
+    assert.equal(bounded.metadata.diagnostics.fileBoundaryDenials.length, install_skills ? 9 : 8);
+    assert.doesNotMatch(JSON.stringify(requests.map(request => request.body)), new RegExp(sentinel));
+    assert.equal(await fs.readFile(hostSkill, 'utf8'), sentinel);
+    assert.doesNotMatch(await fs.readFile(path.join(bounded.metadata.workingDir, '.git/config'), 'utf8'), /MUTATED/);
+    if (installedSkill) assert.match(await fs.readFile(installedSkill, 'utf8'), /name: update-sling-parent-pom/);
+  }
 
   // The corrected window must retain the full output allowance beyond the old
   // 32,768-token limit, without premature native summarization.

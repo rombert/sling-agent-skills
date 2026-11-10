@@ -9,7 +9,8 @@ below are relative to the repository root.
 
 Requires Node.js 22.19+, Git, Java 21, Maven,
 `LITELLM_API_KEY`, and the locally installed `pi` CLI.
-The Pi integration is tested with **Pi 1.4.0** (`@earendil-works/pi-coding-agent`).
+The Pi integration is tested with **Pi 1.4.0 and 1.5.0**
+(`@earendil-works/pi-coding-agent`); Promptfoo is pinned to **0.125.1**.
 Project-local dependencies are pinned `yaml`, `saxes`, and `fflate` (installed
 with `npm ci`); no Pi SDK is installed. The graders parse the actual parent and
 effective POM XML in JavaScript, respecting XML namespaces and declared encodings.
@@ -78,8 +79,10 @@ This passes `--repeat` to Promptfoo, keeping the individual results in one
 evaluation record. Runs remain serial. The shared coding-provider setting
 `maxRetries: 0` disables Promptfoo's whole-task retries, including on HTTP 429:
 a failed coding attempt is recorded rather than restarted in a fresh clone.
-Pi's own request retries are also disabled. The grading provider is configured
-separately and is not affected by this coding-provider setting.
+Pi's own request retries are also disabled. The grading provider has its own
+explicit `maxRetries: 0`; coding-provider settings alone do not disable grading
+HTTP retries. Transport/rate-limit errors are execution errors, not evidence that
+the model passed or failed the task. Do not automatically resubmit failed slots.
 
 The configuration runs `pi-with-skills` and `pi-without-skills`. Builds remain
 serial to avoid contention in the shared Maven repository. Invalid arm or
@@ -138,6 +141,22 @@ PI_EVAL_INTEGRATION=1 node --test evals/providers/promptfoo/pi-provider.test.cjs
 Set `PI_EVAL_COMMAND` to test another Pi executable, or
 `PI_EVAL_KEEP_ARTIFACTS=1` to retain the test workspaces for debugging.
 
+An additional opt-in native Promptfoo test uses an echo coding provider and a
+loopback grading endpoint returning HTTP 503. It verifies that the generated
+grading configuration makes exactly one HTTP request, without paid model calls:
+
+```sh
+PROMPTFOO_EVAL_INTEGRATION=1 node --test evals/providers/promptfoo/grading-provider.test.cjs
+```
+
+When other providers are building concurrently, use a separate writable Maven
+repository and settings file. Export `MAVEN_ARGS="--settings /absolute/path/to/settings.xml"`
+with that file's `<localRepository>` pointing to the private cache; both Pi's
+shell tools and the independent checks inherit it. Do not hardlink a mutable
+cache to `~/.m2`. Keep the catalog's `mvn clean verify` command unchanged. Use
+explicit, unique `EVAL_CONFIG`, `EVAL_RESULTS`, and `PROMPTFOO_WORKSPACE_ROOT`
+paths for each live batch so retained evidence is not overwritten.
+
 ## Shared scenario catalog and provider boundary
 
 `evals/scenarios.yaml` is the sole source of repository URLs/revisions, fixture setup,
@@ -175,6 +194,237 @@ the expected bundle metadata. Duration was 6m 34s; usage was 513,190 tokens
 including the single rubric grading call. This is a functional integration
 smoke test, not a with/without-skills benchmark or a reliability estimate.
 
+### Interrupted five-project matrix: 2026-11-09
+
+Evaluation `eval-nUr-2026-11-09T16:10:38` was stopped at the user's request.
+Its aggregate JSON was not exported. A read-only SQLite recovery of this exact
+evaluation recovered seven persisted native result rows; retained Pi events
+confirm the eighth attempt was cancelled, not completed. No recovery model calls,
+judges, builds, rescoring, or retries were performed.
+
+| Scenario | With skills | Without skills | Independent executable evidence |
+| --- | --- | --- | --- |
+| JCR JS nodetypes 34→46 | Native 5/5 PASS; parent skill read | Output-limit ERROR, turn 13; no assertions | With: 29 Java + 39 Jasmine tests; 25 major-52 classes; bundle PASS. Without: not checked. |
+| Discovery standalone 46→52 | Native 5/5 PASS; parent skill read | Native 5/5 PASS; no observed skill read | Both: 6 tests; 13 major-52 classes; bundle PASS. |
+| JCR packageinit 52→60 | Native 5/5 PASS; parent skill read | Native 5/5 PASS, but **contaminated** by a host skill read | Both: 6 tests; 4 major-52 classes; bundle PASS. |
+| JUnit healthcheck 43→46 | Native 5/5 PASS; parent and SCR skills read | **Cancelled** after 37 complete model turns; host skills read | With: 3 tests; 6 major-52 classes; bundle PASS. Without: not independently checked. |
+| Discovery impl 52→60 | Unattempted | Unattempted | None from this evaluation. |
+
+Here “5/5” means all five persisted native assertions passed, including the
+separate qualitative judge; it is not inferred from a successful build. All six
+executable passes also have retained before/after effective-POM comparisons
+confirming **main and test targets both stayed Java 8**, plus exact parent,
+nonempty class sets, predetermined test totals and bundle checks. Historical
+native scores remain unchanged. The packageinit no-skills PASS is **not valid
+clean no-skills benchmark evidence**: it read the parent skill from the host's
+Copilot cache. The cancelled healthcheck no-skills attempt read the parent and
+SCR skills from the host checkout. Discovery suppression is not filesystem
+isolation.
+
+The provider now records successful **uninstalled** native `SKILL.md` reads,
+including partial reads, and fails SkillUsage for contamination in either arm.
+Previously it tracked only installed private skill paths and missed these reads.
+Continuation also uses the separately versioned native file boundary documented
+below; it does not retroactively change these scores. Neither control is an OS
+sandbox: arbitrary shell reads are not comprehensively detected. Strong host
+filesystem isolation remains a prerequisite for claiming an uncontaminated
+comparative benchmark.
+
+The JCR no-skills error was an unrecovered `length` response with 8,192 output
+tokens (8,010 reasoning tokens), effective `max_tokens=8192`, and only about
+27,716/131,072 context tokens. It was not context starvation, an HTTP/auth error,
+or a grading failure. Explicit grading `maxRetries: 0` was already present in
+this matrix and does not remedy output truncation. No automatic rerun is planned.
+
+Actual runtimes were Node 24.22.1, Pi 1.5.0, Promptfoo 0.125.1, Maven 3.10.0,
+and Java 21.0.13. Coding used `qwen3.8-27b`, temperature 0, max output 8,192,
+context metadata 131,072, server-side thinking enabled; the six qualitative
+judges used `gemma4-26b`, all through `https://llm.apache.org/v1`.
+Persisted coding usage was 5,545,202 tokens and judging usage 56,381. The
+cancelled attempt adds at least 1,424,405 reported tokens from complete messages;
+its interrupted final stream is not included in that lower bound.
+
+Ignored recovery artifacts under `target/evals/`:
+
+- `promptfoo-full-validation-20261109.config.json`, `.log`, and `-workspaces/`:
+  original retained evidence, not overwritten by recovery.
+- `promptfoo-full-validation-20261109.native-rows.recovered.json`: seven persisted
+  native rows from a read-only/query-only SQLite transaction, with sensitive
+  headers redacted. This is not a completed native aggregate export.
+- `promptfoo-full-validation-20261109.recovered-audited.json`: ten-slot inventory,
+  exact eval/result/attempt identities, source and prepared-baseline SHAs,
+  frozen scenarios, assertion outcomes, executable checks, activation evidence,
+  usage, hashes and continuation provenance.
+- `promptfoo-native-boundary-v1-readiness-20261109.json`: separate continuation
+  harness-control version, source/config hashes, native API evidence, offline
+  regression results, immutable-evidence verification and explicit limitations.
+- `promptfoo-native-boundary-v1-four-slots-readiness-20261109.json`: subsequent
+  authorization snapshot adding **exactly one** replacement control attempt,
+  for **four total prepared slots** under `native-file-boundary-v1`. The earlier
+  readiness snapshot and all 85 previously hashed evidence/config/skill files
+  remain unchanged. Live gateway authorization is still required.
+- `promptfoo-continuation-20261109-healthcheck-without-skills.config.json`: only
+  the cancelled slot, as a new attempt; no session resume or retry-cache reuse.
+- `promptfoo-continuation-20261109-discovery-impl-both.config.json`: only the two
+  unattempted slots. Its with-skills provider references the retained original
+  skill copy; both continuation configs otherwise retain original task objects,
+  prompts, model settings and rubrics unchanged.
+- `promptfoo-continuation-20261109-packageinit-without-skills-replacement-attempt2.config.json`:
+  the user's explicitly approved **one additional** packageinit no-skills control,
+  `RUNS=1`, separately labelled attempt 2. It preserves the original scenario,
+  assertions, model and provider budgets; only the subset and non-prompt evaluation
+  description differ. Its unique `.results.json` and `/tmp/opencode/` workspace
+  paths are recorded in the four-slot readiness manifest. The original
+  contaminated attempt's native score and evidence remain preserved; a new
+  attempt is not automatically a clean control, especially with unrestricted Bash.
+
+The three continuation configs validate offline, but **live continuation remains
+gated on explicit parent authorization**. Do not regenerate them with
+`make run-eval`, which would replace their targeted configuration. Use the
+existing `node evals/run.cjs` launcher with explicit `EVAL_CONFIG`, unique
+`EVAL_RESULTS`, the matching `SCENARIO`/`ARM`, `RUNS=1`, Java 21 and the private
+Maven settings. The four selected slots are cancelled healthcheck no-skills
+attempt 2, both unattempted discovery-impl arms, and the separately approved
+packageinit no-skills replacement attempt 2. The original contaminated packageinit
+result is not overwritten or silently resubmitted. The legitimate JCR no-skills
+output-limit error remains excluded, with no rerun authorized. No Promptfoo live
+execution is authorized until the parent explicitly releases the gateway from
+Inspect and grants it to this provider.
+
+After Inspect released the gateway, the parent conditionally granted these four
+attempts, subject to quota readiness. **No attempt was submitted:** the retained
+Inspect HTTP 429 reported a 500,000-token limit, 40,279 remaining and reset at
+2026-11-09 19:43:21 UTC. That reset had elapsed, but the authenticated read-only
+model listing supplied no current quota figures. HTTP 200 on that endpoint is
+not proof of available generation quota. The already-unavailable quota-info
+endpoint was not repeated, and no paid probe was made. The durable outcome is
+`target/evals/promptfoo-continuation-quota-blocked-20261109.json`: all four slots
+remain unsubmitted, the gateway is released, and nothing is queued for automatic
+resume. The original 85 hashed files were reverified unchanged.
+
+### Authorized packageinit replacement control: completed
+
+After parent quota review explicitly allowed **one** real attempt despite the
+absence of current quota figures, packageinit without skills **attempt 2** ran
+under `native-file-boundary-v1`: `eval-fJl-2026-11-09T19:51:24`, native result
+`d6f452b1-bb8d-45bc-bc63-c2754000d615`. It completed in **290.899 seconds** with
+all five native assertions passing (score 1), including the qualitative judge.
+Independent verification confirmed `mvn clean verify`, exact parent 60, all six
+tests with zero failures/errors/skips, four major-52 class files, expected bundle
+metadata, and preserved effective Java 8 main/test targets.
+
+No skills were installed or loaded; the native boundary had no skill roots and
+recorded zero denials. No successful uninstalled native skill read or obvious
+Bash host-skill read was observed. Bash commands read project files, Maven
+artifacts and downloaded public POMs, not host skill documents. This is observed
+activation evidence, **not an OS-sandbox or universal clean-control guarantee**.
+The original contaminated attempt and its native score remain unchanged.
+
+The run used the same `qwen3.8-27b` generation settings, Pi 1.5.0, Promptfoo
+0.125.1, Java 21.0.13, Maven 3.10.0 and private Promptfoo Maven repository.
+Coding used **518,919 tokens** across 23 reported model calls; the single
+`gemma4-26b` judge used **11,498 tokens** (530,417 total). No retries, other
+continuation slots or historical rescoring were submitted.
+
+Native results and final review are retained under
+`target/evals/promptfoo-continuation-20261109-packageinit-without-skills-replacement-attempt2`
+with `.results.json`, `.final-review.json`, `.log`, `.progress.jsonl` and execution
+start/finish records. The workspace is
+`/tmp/opencode/promptfoo-continuation-20261109-packageinit-without-skills-replacement-attempt2-workspaces/sling-skill-eval-2A1IAb`.
+All 85 prior hashed files were reverified unchanged. At that point the gateway
+was released and the other three prepared slots remained gated for parent
+review. JCR's original output-limit error remains excluded.
+
+### Separately authorized three-slot continuation: completed
+
+The parent subsequently authorized discovery impl with skills, discovery impl
+without skills, and healthcheck without skills, in that order. Each used a
+**separate one-slot native CLI invocation**, with immutable selected scenario
+objects, generation settings, budgets and rubrics under `native-file-boundary-v1`.
+No retries or historical rescoring were submitted.
+
+| Slot | Native outcome | Elapsed | Coding / judging tokens |
+| --- | --- | --- | --- |
+| Discovery impl with skills, attempt 1 | All five assertions PASS | 775.796 s | 215,430 / 20,745 |
+| Discovery impl without skills, attempt 1 | All five assertions PASS; auxiliary skip-flag caveat below | 722.390 s | 746,770 / 21,204 |
+| Healthcheck without skills, attempt 2 | HTTP 429 ERROR; no assertions or independent checks ran | 1,194.045 s | 3,948,302 / 0 |
+
+Both discovery slots independently passed `mvn clean verify`, exact parent 60,
+all **45** expected tests with zero failures/errors/skips, **49 major-55** class
+files, expected bundle metadata, and preserved effective **Java 11 main/test**
+targets. With skills loaded the declared parent skill and read references only
+from its private copy. Neither no-skills slot showed a successful native skill
+read or an obvious Bash host-skill read in the available transcript. All three
+recorded zero native boundary denials. Bash remains unrestricted; these are
+observations, not a filesystem-isolation or universal clean-control guarantee.
+
+**Protocol caveat:** discovery impl without skills used `-DskipTests` while
+building a copied parent-52 comparison project at `/tmp/ab52` for manifest
+comparison. The final edited project was independently verified without skip
+flags, with all 45 expected tests passing. Its native five scores remain
+unchanged, but this auxiliary use conflicts with the blanket no-skip-flags
+instruction: do not claim perfect protocol compliance or hide it behind the
+native qualitative PASS. Per-slot `.protocol-review.json` records retain this
+evidence. The other three new attempts had no explicit Maven skip flags observed.
+
+A subsequent **offline provenance review** recovered the actual retained
+UpgradeQuality `metadata.renderedGradingPrompt` for discovery without skills
+(SHA-256 `9022ba2f497c6eaaa2ccf27b5a23a0c044804d61aad06f2a28fee4d063b29a8e`).
+Neither `-DskipTests` nor `/tmp/ab52` occurs in those retained judge messages.
+The decoded output contains six source records and seven Git-action records;
+the comparison commands at tool indices 26 and 27 qualified for neither channel.
+This is an **adapter evidence-routing omission**, not proof that the judge
+overlooked fully supplied command evidence. It does not establish what a judge
+would decide with a different input. Original grades and inputs remain unchanged.
+
+For **future inputs only**, `commandEvidence.version=bounded-command-evidence-v1`
+adds at most eight deduplicated Bash records, prioritizing check-option mentions,
+Git mutation mentions, copy/worktree commands and Maven commands, with recent
+records first within each priority. It reserves a 16,000-character combined
+command/serialized-result text budget alongside the unchanged actual diff,
+source and Git evidence. Selection inspects command inputs, not fetched tool
+output. Records are explicitly untrusted; echoed/quoted mentions are not proof
+of execution, and no regex match produces a pass/fail verdict. No rubric,
+assertion count, expected result or model budget changed, and no retrospective
+judge call or evaluation was made. Existing live-run receipts retain their
+original source hashes; this future evidence transformation has its own version.
+
+Healthcheck's error occurred on reported model call 72: HTTP **429**, token limit
+**500,000**, remaining **0**, reported reset **2026-11-09 20:46:06 UTC**. The final
+failed call reported zero usage. It did not record completion; the native zero
+is an execution error, **not a negative model-quality judgment**. No retry,
+wait-for-reset continuation, paid probe or other submission followed. The
+credential-safe `.transport-review.json` retains numeric diagnostics without
+repeating the upstream error body.
+
+Native evaluation/result identities:
+
+- Discovery with: `eval-Og6-2026-11-09T19:59:54` /
+  `6022a571-62d0-4392-8f57-530a6b326b7c`.
+- Discovery without: `eval-4Gk-2026-11-09T20:13:03` /
+  `61f762d5-eef3-478e-a5c1-130c06e67735`.
+- Healthcheck without: `eval-Hwp-2026-11-09T20:25:16` /
+  `e1aa7900-c85c-457a-8167-38113a820008`.
+
+`target/evals/promptfoo-continuation-consolidated-20261109.json` combines these
+three outcomes with the separate packageinit replacement: **four new attempts,
+three native passes, one transport error**, with 5,429,421 reported coding tokens
+and 53,447 judging tokens (5,482,868 total). Per-slot configs, `.results.json`,
+`.final-review.json`, `.protocol-review.json`, logs and progress/execution records
+use the prefixes `promptfoo-continuation-20261109-discovery-impl-with-skills-attempt1`,
+`...-discovery-impl-without-skills-attempt1`, and
+`...-healthcheck-without-skills-attempt2` under `target/evals/`. Workspaces remain
+under their corresponding `/tmp/opencode/<prefix>-workspaces/` directories.
+
+The effective ten-distinct-slot inventory now contains **eight native PASS
+slots and two ERROR gaps**: original JCR no-skills output truncation and the new
+healthcheck no-skills HTTP 429. This includes the disclosed discovery protocol
+caveat and is a **mixed original/new-harness series**, not one identical-harness
+causal skills benchmark. The original contaminated packageinit control is still
+preserved and excluded as a clean control. All 85 prior hashed files and seven
+historical native scores were reverified unchanged. All four newly authorized
+attempts have terminated; **the gateway is released and nothing is queued**.
+
 ## Pi harness
 
 `pi-provider.cjs` launches `pi --mode json` in a fresh clone.
@@ -182,8 +432,9 @@ smoke test, not a with/without-skills benchmark or a reliability estimate.
 `pi-eval.ts` extension adds only evaluation controls: `finish_task`,
 turn/text-only/repetition limits, and a native bash
 wrapper that removes `LITELLM_API_KEY` and `GIT_*` from subprocess environments
-and caps command timeouts. File editing, reading, searching, and shell execution
-remain Pi's own implementations. HTTP retrieval uses shell tools such as `curl`.
+and caps command timeouts. A native `tool_call` preflight hook enforces file-tool
+path boundaries. File editing, reading, searching, and shell execution remain
+Pi's own implementations. HTTP retrieval uses shell tools such as `curl`.
 Set `piCommand` in the provider config to use a different executable path;
 the default is `pi` from `PATH`.
 
@@ -204,6 +455,54 @@ with-skills variant. Sessions are not resumed or saved. Startup networking,
 telemetry, cache warming, and transient-error retries are disabled. Native
 compaction is enabled, including Pi's bounded compact-and-retry recovery for
 context-clamped responses.
+
+### Native file boundary: `native-file-boundary-v1`
+
+This new continuation control uses Pi's supported **pre-execution `tool_call`
+hook**, verified against the installed **Pi 1.5.0** documentation and native
+tools. It blocks calls or mutates `event.input.path` to the checked canonical
+path. It does not replace Pi's file tools or agent loop. The same policy applies
+in both arms:
+
+- `read`, `grep`, `find`, `ls`: only the disposable project and each explicitly
+  copied skill directory are readable/searchable. No-skills has no skill roots.
+  Other host locations, including the Copilot cache, checkout skills, other
+  attempts, private Pi configuration and Maven cache, are denied to these tools.
+- `edit`, `write`: only project files are writable. Copied skills and the
+  project's `.git` metadata are read-only to native file tools.
+- Existing symlinks are resolved before checking the boundary. Missing write
+  targets are checked through their existing ancestors; dangling symlinks and
+  escapes are denied. Reads must resolve to an existing allowed target; Pi's
+  alternate-filename fallback is not used to bypass the check. Ordinary relative,
+  absolute, `@`, `~` and `file://` spellings are checked and canonicalized.
+- Denied calls return an error before content is read or a write executes. A
+  blocked host-skill read is not credited as successful skill exposure. The
+  post-hoc fail-closed audit remains in place for successful uninstalled reads.
+
+The provider records the configured version/roots in `pi-agent/eval.json` and
+response `metadata.harnessControls.nativeFileBoundary`. The extension emits an
+`eval-controls` acknowledgement before the first normal provider request;
+`diagnostics.controls` retains the initialized policy. Denials are retained as
+`eval-file-boundary` events and `diagnostics.fileBoundaryDenials`; approved
+canonical paths are retained as `eval-file-access` events. The common system
+instructions explain the new boundary and prohibit using Bash to circumvent it.
+Original scenario prompts, generation settings and rubrics are unchanged. Report
+continuation under this **new harness-control version**, not as identical to the
+interrupted original harness.
+
+**This is not OS/filesystem isolation.** Bash remains unrestricted, can read or
+modify host files and skills, and can race or bypass path preflight checks.
+Hardlinks and concurrent filesystem manipulation are not security-contained.
+Full shell command/results remain in the transcript, but no general shell-read
+detector or absence-of-contamination guarantee is claimed. Native boundary
+success must not be presented as a sandboxed comparative benchmark.
+
+Offline native-Pi tests replay the observed Copilot-cache and checkout skill
+paths in both arms, plus an existing synthetic host skill with a sentinel. They
+verify boundary errors and that sentinel content never reaches the next model
+request, while normal project tools and declared copied-skill reads work and
+skill/Git-metadata writes do not. Helper tests cover canonicalization, traversal,
+prefix lookalikes, symlink escapes, dangling links and new write paths.
 
 ### Pi context management
 
@@ -274,6 +573,8 @@ The two skills arms have identical user prompts, model settings, and tools:
 For the SkillUsage assertion, only a successful native `read` of the installed
 skill's entire `SKILL.md` counts (no `offset`/`limit`). The prompt asks the model
 to use that auditable route; shell reads or partial reads are not credited.
+Successful native reads of an uninstalled host `SKILL.md`, even partial reads,
+are retained separately as contamination and fail SkillUsage in either arm.
 
 ## Workspaces and grading
 

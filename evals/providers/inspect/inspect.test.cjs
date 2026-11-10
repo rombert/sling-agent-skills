@@ -99,8 +99,10 @@ test('Inspect launcher owns pinned Python execution, exported credentials, viewe
 
 test('Inspect credentials and inherited Git context are removed without removing Maven credentials', () => {
   assert.deepEqual(childEnvironment({ PATH: '/bin', JAVA_HOME: '/jdk21', LITELLM_API_KEY: 'secret',
-    OPENAI_API_KEY: 'other', GIT_DIR: '/other-repo', MAVEN_REPOSITORY_TOKEN: 'needed' }), {
-    PATH: '/bin', JAVA_HOME: '/jdk21', MAVEN_REPOSITORY_TOKEN: 'needed' });
+    OPENAI_API_KEY: 'other', GIT_DIR: '/other-repo', MAVEN_REPOSITORY_TOKEN: 'needed',
+    MAVEN_ARGS: '--settings /private/settings.xml', MAVEN_OPTS: '-Dmaven.repo.local=/private/repository' }), {
+    PATH: '/bin', JAVA_HOME: '/jdk21', MAVEN_REPOSITORY_TOKEN: 'needed',
+    MAVEN_ARGS: '--settings /private/settings.xml', MAVEN_OPTS: '-Dmaven.repo.local=/private/repository' });
 });
 
 test('shared executable checks fail closed on missing completion without invoking Maven', async (t) => {

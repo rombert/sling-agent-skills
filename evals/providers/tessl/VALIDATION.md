@@ -1,6 +1,6 @@
 # Validation record — retained evidence reviewed 2026-11-09
 
-## Outcome: full native batch complete; independent collection incomplete
+## Outcome: full native and executable coverage complete; overall evaluation nonpassing
 
 The standalone skills-arm migration completed hosted setup, solving, scoring,
 automatic download and independent executable verification. Parent 52, Java 8
@@ -11,9 +11,17 @@ New generations enforce activation through a mandatory metadata audit instead
 of an unsupported judge item. Historical scores remain unchanged. The full five-
 project/both-arm batch subsequently completed native scoring in all ten slots,
 with seven perfect scores and correct activation behavior in all ten. Independent
-collection stopped after one verification failure and a subsequent download error;
-nine full-batch executable outcomes remain unverified. Scores, executable checks
-and activation audits are distinct evidence; full passing parity is not established.
+collection stopped after one verification failure and a subsequent download error.
+Incremental/resumable collection is now implemented and the existing failure has
+been adopted read-only into a durable ten-slot aggregate; nine full-batch
+executable outcomes remained unverified at that offline checkpoint. The user
+subsequently restored CLI access and explicitly authorized read-only collection
+of those missing outcomes. All nine newly collected solutions passed independent
+verification: **9 executable PASS, 1 preserved FAIL, 0 missing**. Native scores
+remain perfect in **7/10**, activation audits pass **10/10**, and the combined
+policy passes **6/10** slots. Scores, executable checks and activation audits are
+distinct evidence; the batch is not an all-passing evaluation or proof of skill
+effect.
 
 ### Completed full batch and collection interruption
 
@@ -24,11 +32,11 @@ The submission ledger is `postprocessing-failed`, not a failed remote solve.
 
 | Scenario | Native with skills | Native without skills | Independent full-batch verification |
 |---|---:|---:|---|
-| discovery-impl | 8.75/9 | 9/9 | Without skills: FAIL; with skills: not collected |
-| JCR packageinit | 8.5/9 | 9/9 | Neither arm collected |
-| JCR JS nodetypes | 10/10 | 8/10 | Neither arm collected |
-| JUnit healthcheck | 9/9 | 9/9 | Neither arm collected |
-| discovery-standalone | 9/9 | 9/9 | Neither arm collected (the earlier separate skills run passed) |
+| discovery-impl | 8.75/9 | 9/9 | With skills: PASS; without skills: preserved FAIL |
+| JCR packageinit | 8.5/9 | 9/9 | Both arms PASS |
+| JCR JS nodetypes | 10/10 | 8/10 | Both arms PASS |
+| JUnit healthcheck | 9/9 | 9/9 | Both arms PASS |
+| discovery-standalone | 9/9 | 9/9 | Both arms PASS; separate earlier skills run remains historical evidence |
 
 Native deductions were for unnecessary Mockito upgrades in the discovery-impl
 and packageinit skills arms (packageinit also added `.sling-module.json`), and for
@@ -36,21 +44,222 @@ retaining old Mockito with a forbidden `--add-opens` workaround in JCR JS withou
 skills. No scores have been rewritten. Each skills arm has relevant native
 `read` activation evidence; every no-skills arm has an empty `activatedSkills`.
 
-Only solution `01a1b212-7646-74f1-94f0-a7298f52e7b8` (discovery-impl without skills)
-completed independent verification. It preserved Java 11 targets but failed
+Before remediation, only solution `01a1b212-7646-74f1-94f0-a7298f52e7b8`
+(discovery-impl without skills) had completed independent verification. It
+preserved Java 11 targets but failed
 `TopologyEventTest>AbstractTopologyEventTest.testGetDuringDelay:234`, expecting
 zero events and observing one: 45 tests, one failure, no final JAR. The build log
 reports roughly one day and 18 hours elapsed. The cause is unresolved; this is
 not classified as a confirmed model defect or a confirmed flaky test.
 
-The next solution download failed with `getaddrinfo EAI_AGAIN tessl.io`, PostHog
+The next historical solution download failed with `getaddrinfo EAI_AGAIN tessl.io`, PostHog
 network errors and a request to authenticate. Collection aborted before writing
 a complete `verification-report.json`. Resume downloads/independent checks only
 after connectivity/authentication is restored; **do not resubmit or rescore the
-completed batch**. This review used retained artifacts only and made no new
-remote calls. The collector also needs incremental persistence/resume support
-to avoid losing its partial aggregate or unnecessarily repeating completed work
-after a later download fails.
+completed batch**. The initial offline remediation phase on 2026-11-09 made one read-only access check:
+`tessl whoami` exited 1 with “You are not logged in” and “Please authenticate”.
+No download was attempted in that phase, no interactive authentication or credential changes
+were performed, and no new solve, judge, retry, polling or charge was initiated.
+DNS connectivity was not independently established after the decisive login
+blocker. The existing submission ledger remains `postprocessing-failed` and was
+not edited.
+
+### Incremental remediation and retained resume evidence — 2026-11-09
+
+The collector now persists all native grades/activation metadata before the first
+download, plus download/verification transitions, errors and incomplete coverage.
+Each collection retains immutable report revisions and attempt directories; the
+latest aggregate is updated atomically. Explicit resume validates frozen inputs,
+native views, verifier/shared-check/dependency-lock identity, source-snapshot
+checksums and verification receipts before reusing completed PASS **or FAIL**.
+It refuses changed inputs and does not automatically retry verification errors.
+The first failed remote download stops further remote reads in that invocation.
+
+The existing discovery-impl no-skills failure was safely adopted, not rebuilt.
+The read-only adoption matched its frozen scenario/check definition, source pin
+and prepared baseline `8743059e9f26b26eb84a06a800071736271db208`, downloaded and
+imported source trees, retained check results, effective main/test targets (11),
+and failed Maven log. Imported-source snapshot SHA-256 is
+`164444afa3f5050b5d31b316bdfcd6f148437409ec606a731a5d59fd133bd77f`.
+Thirteen supporting files are checksum-pinned. The original `verification.json`,
+logs, clone and failing test evidence are unchanged. This establishes matching
+retained evidence, **not** an explanation of the anomalous elapsed time or a new
+successful execution. The unresolved failure and no-final-JAR result remain.
+
+The initial offline remediation retained the following evidence (all historical
+checkpoints remain unchanged; the completed latest report is described below):
+
+- The then-current `verification-report.json`: ten native records; **0 executable PASS, 1 completed
+  executable FAIL, 9 missing**; `coverage.nativeComplete=true`,
+  `coverage.complete=false`, `pass=false`; all native deductions unchanged and
+  all ten activation audits passing.
+- `collection/022add34-b8f8-45f3-9469-9927e732f42b/report-0022.json`: immutable
+  finalized offline collection/adoption checkpoint. A subsequent offline explicit
+  resume also succeeded in reusing the failed receipt without downloading or
+  rebuilding; its immutable checkpoint is
+  `collection/bb792921-f451-4f62-9ae8-2bd7b956c787/report-0022.json`.
+- `legacy-evidence.json`: the explicit reviewed legacy solution-to-report mapping.
+- `access-check-2026-11-09.json`: the access blocker and no-retry decision.
+- `remediation-outcome-audit.json`: initial offline counts and then-current frozen/verifier
+  bindings, reused failed receipt and original verification/ledger checksums.
+- `collector-finalization-audit.json`: earlier development checkpoints were
+  preserved intact after the last collector-only locking/resume fixes changed
+  the verifier fingerprint. The original legacy failure was re-audited offline
+  under the finalized collector, without repeating any build or download.
+
+Both historical collection commands intentionally exited **1** because the evaluation was not
+passing; this is not lost progress or another failed remote solve:
+
+```sh
+TESSL_MANIFEST=target/evals/tessl/generations/6514ef39-3f5e-40be-be31-d6a8ee650f3c/manifest.json \
+  TESSL_LEGACY_EVIDENCE=target/evals/tessl/generations/6514ef39-3f5e-40be-be31-d6a8ee650f3c/legacy-evidence.json \
+  TESSL_COLLECT_OFFLINE=1 RUNS=1 node evals/providers/tessl/collect.cjs
+
+TESSL_MANIFEST=target/evals/tessl/generations/6514ef39-3f5e-40be-be31-d6a8ee650f3c/manifest.json \
+  TESSL_COLLECT_RESUME=1 TESSL_COLLECT_OFFLINE=1 RUNS=1 \
+  node evals/providers/tessl/collect.cjs
+```
+
+After the user restored existing Tessl CLI access, the explicitly permitted
+`tessl whoami` check succeeded and this read-only download/isolated-cache
+verification command completed the nine missing outcomes, not a paid launcher
+or rescore:
+
+```sh
+TESSL_MANIFEST=target/evals/tessl/generations/6514ef39-3f5e-40be-be31-d6a8ee650f3c/manifest.json \
+  TESSL_COLLECT_RESUME=1 RUNS=1 node evals/providers/tessl/collect.cjs
+```
+
+This preserved/reused the known failed solution and attempted only the nine
+missing downloads/checks, with no automatic retries or renewed access failures.
+New builds used Java **21.0.13** for Java and Maven **3.10.0** (confirmed by
+retained runtime evidence), provider-owned settings and a separate writable
+`verification-maven/repository` cache; no mutable shared Maven-cache hardlinks.
+Exact source pins, catalog command, parent/bytecode/test/bundle checks and
+1,200-second command timeout are unchanged. The original no-skills discovery
+failure was not rebuilt.
+
+Scoped offline regression command:
+
+```sh
+node --test evals/providers/tessl/*.test.cjs
+```
+
+Result after parent review: **62 passed, 1 opt-in rootless integration skipped,
+0 failures** (63 tests, including 24 supporting-file mutation/removal subtests).
+Coverage includes interrupted downloads, metadata-first persistence, incomplete
+native/executable coverage, explicit resume, failed-result reuse, altered evidence
+rejection, interrupted metadata recollection, later-slot receipt preservation
+after an early download failure, locking, historical deductions, legacy
+read-only adoption and isolated Java/Maven settings. Tests use mocks or disposable
+local repositories, not paid solves or judges. The older standalone skills run
+remains native **9/10**, independent **PASS**, with skill-tool activation; it is
+not substituted for either full-batch standalone slot.
+
+### Parent review follow-up: compatibility and new-receipt support binding
+
+The collector's newly introduced ten-repetition restriction was removed. It now
+requires a positive safe integer, consistent with common `RUNS` parsing, and a
+mocked eleven-repetition collection regression passes. This changes completed
+result collection only, not the pre-existing paid-launcher budget policy.
+
+New independent receipts now bind their actual `verification.json`, frozen
+scenario/repository metadata, Java/Maven version and runtime/cache configuration,
+scenario-check results, build log and retained effective-POM/comparison/log files.
+The verifier's on-disk result and scenario checks must match its returned result.
+Tests mutate and remove each of twelve supporting files individually, verify that
+resume fails closed without downloads/builds, reject absent support inventories
+and required files, and preserve a legitimate early rejection without inventing
+unexecuted Maven/target artifacts. Fake verifiers explicitly produce labelled
+mock evidence; they do not claim a real build.
+
+`parent-review-migration.json` records the explicit reviewed migration: the old
+schema-2 verifier binding was **rejected**, its latest aggregate was archived
+unchanged alongside its immutable checkpoint revisions, and the original
+discovery-impl failure was adopted read-only again under the updated verifier.
+The frozen manifest, native response/view, original failure and submission ledger
+checksums were pinned before migration. Offline collection and explicit offline
+resume retained **1 known FAIL and 9 missing** before any restored-access call.
+No incompatible schema-2 receipt was silently accepted, and no build/download was
+repeated during migration.
+
+### Restored access: existing completed-result collection finished
+
+After the user explicitly confirmed restored login, the one permitted
+`tessl whoami` access check exited **0** (“You are logged in to Tessl”).
+`access-restored-2026-11-09.json` retains this decision separately from the earlier
+failed check. The existing completed batch was resumed with the documented
+`TESSL_COLLECT_RESUME=1` command, without another native view, solve, submission or
+rescore. The known no-skills discovery failure is reused, not rebuilt.
+
+Status rechecked at **2026-11-09 16:52:24 UTC**: collection is finished, with
+**no active collector/download/verification process, no active slot and no
+generation lock**. The resumed collection ran from **16:22:23.776 UTC** to
+**16:29:46.750 UTC**, approximately **7 minutes 23 seconds**. Its last progress
+was complete ten-slot executable coverage, followed by successful fully offline
+reuse of all ten receipts. There is no remaining authentication/transport blocker;
+the nonpassing result is the preserved executable failure plus native deductions.
+
+All nine newly downloaded solutions passed `mvn clean verify`, exact parent,
+inherited main/test compiler targets, bytecode, test totals and bundle metadata
+checks. They used Java **21.0.13**, Maven **3.10.0** on that same Java 21, the
+generation-owned `verification-maven/` settings/repository, and the unchanged
+**1,200,000 ms** catalog command timeout. No build was skipped, relaxed or retried.
+Native deductions, including the no-skills JCR JS model's forbidden `--add-opens`
+workaround, remain native failures even though its executable checks passed.
+
+Final executable outcomes, relative to the frozen generation:
+
+| Scenario | Arm | Solution ID | Attempt | Executable outcome / exact test totals |
+|---|---|---|---|---|
+| discovery-impl | without-skills | `01a1b212-7646-74f1-94f0-a7298f52e7b8` | `attempt-OyU7Y5` | Preserved FAIL: Java 11, 45 tests / 1 failure, no JAR; no rerun |
+| discovery-impl | with-skills | `01a1b212-7635-7756-9fb9-7a630d6d374b` | `attempt-B3V8Ab` | PASS: Java 11, 45 tests |
+| JCR packageinit | without-skills | `01a1b212-7664-71a9-a38e-1ac70532c3e9` | `attempt-lzpLb9` | PASS: Java 8, 6 tests |
+| JCR packageinit | with-skills | `01a1b212-7656-7431-ada5-d6611ab00ab7` | `attempt-4UM9h6` | PASS: Java 8, 6 tests |
+| JCR JS nodetypes | without-skills | `01a1b212-7686-711f-bbd1-afc30a3d2dc9` | `attempt-GtY3Pp` | PASS: Java 8, 29 Java + 39 JavaScript tests |
+| JCR JS nodetypes | with-skills | `01a1b212-7673-70ad-9bd7-72fad67e87c1` | `attempt-KcpBM0` | PASS: Java 8, 29 Java + 39 JavaScript tests |
+| JUnit healthcheck | without-skills | `01a1b212-76a2-7746-8ccf-4dc62112568a` | `attempt-6Xrg62` | PASS: Java 8, 3 tests |
+| JUnit healthcheck | with-skills | `01a1b212-7694-73d7-b08c-c12fd33e8be9` | `attempt-K5kSR4` | PASS: Java 8, 3 tests |
+| discovery-standalone | without-skills | `01a1b212-76c1-745b-aca4-63ce579767f2` | `attempt-XJgqWr` | PASS: Java 8, 6 tests |
+| discovery-standalone | with-skills | `01a1b212-76b2-73f6-9d24-00204e137cd5` | `attempt-jnN1mv` | PASS: Java 8, 6 tests |
+
+Each attempt is retained at `verification/<solution-id>/<attempt>/`, including
+the original `verification.json`, check results, effective POMs, logs and runtime
+evidence. The new collector receipt is `collection-verification.json`. Each new
+receipt binds **12 supporting files**; the preserved legacy failure binds **13**.
+Downloaded snapshots are retained under the completed collection directory's
+`downloads/<solution-id>/`, separately from verification clones.
+
+Final immutable checkpoints:
+
+- Completed collection:
+  `collection/e11be1ba-0f27-41fa-9383-ce8765097a7c/report-0049.json`.
+- Subsequent fully offline reuse of all ten completed outcomes:
+  `collection/c44f6430-02a0-4683-bce2-7fab12728f68/report-0022.json`.
+- `completed-batch-outcome-audit.json`: per-slot results, complete coverage,
+  current frozen/verifier bindings, all-ten offline reuse and unchanged original
+  failure, manifest/native response/view and submission-ledger checksums.
+
+The latest `verification-report.json` has **10/10 native and executable coverage,
+9 executable PASS, 1 executable FAIL, 0 missing, no collection errors**. All ten
+activation audits pass; seven native scores are perfect. Combined policy passes
+six slots and `pass=false` correctly remains. The collection exits **1** for this
+nonpassing evaluation, not for missing coverage or transport failure. No paid
+submission, solve, scoring or model call was made; charges remain unchanged.
+
+Safe repeat inspection requires no Tessl connectivity and performs no builds:
+
+```sh
+TESSL_MANIFEST=target/evals/tessl/generations/6514ef39-3f5e-40be-be31-d6a8ee650f3c/manifest.json \
+  TESSL_COLLECT_RESUME=1 TESSL_COLLECT_OFFLINE=1 RUNS=1 \
+  node evals/providers/tessl/collect.cjs
+```
+
+This command was executed after collection and reused all ten results while
+checking **121 supporting-file hashes**. No further downloads or builds are
+needed. The original failure's cause remains unresolved; do not rerun it merely
+to obtain a pass. The original ledger remains `postprocessing-failed` unchanged,
+with final collection evidence retained independently in this generation.
 
 ## Troubleshooting and credit record
 
@@ -69,7 +278,7 @@ not platform quotes. No automatic adapter retries or rescoring were used.
 | `01a1b1e5-80b0-7395-9ef9-0999083ed08e` | Migration with native fixture and preserved Git metadata | Setup failed before model; final attempt could not read resources/baseline.txt | 10 |
 | `01a1b1e8-a1ca-76a7-a948-fc94fd135920` | Combined native fixture/SDK/context trace | Completed; diagnostic 1/1; exposed checkout deletion of harness payload | 10.9268194 |
 | `01a1b1f1-7247-71ce-9c6f-4fd3f21cf209` | Real standalone migration, skills arm | Native 9/10; independent checks PASS; native skill-tool activation confirmed | 13.0291564 |
-| `01a1b212-71c8-735e-88c2-3ac9991db884` | Five projects, both arms, one repetition | All ten native slots completed; independent collection interrupted | 157.2458338 |
+| `01a1b212-71c8-735e-88c2-3ac9991db884` | Five projects, both arms, one repetition | Native and executable coverage complete; 9 executable PASS, 1 preserved FAIL | 157.2458338 |
 
 Confirmed subtotal before the corrected scored run: **82.5383888 credits**.
 Local CLI validation rejections created no remote run and are not extra charges.

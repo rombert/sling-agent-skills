@@ -11,9 +11,9 @@ no-skill arms. Implemented coverage is not the same as verified live coverage:
 
 | Provider | Demonstrated live results | Remaining gaps |
 |---|---|---|
-| Promptfoo / Pi | One JCR JS skills-arm smoke passed all five assertions, including independent builds/artifact checks. Shared checks passed again on its retained solution after the refactor. | No full five-project/both-arm live batch; the newly shared model-config wiring has offline coverage, not a new live run. |
-| Tessl / hosted Claude agent | All ten slots completed native scoring; seven received full marks. All ten activation records match the expected arm. A separate standalone skills run passed independent verification. | Full-batch collection stopped after one independent check, which failed a discovery timing test. Nine slots remain independently unverified; native scores are not build passes. Downloads need restored connectivity/authentication. |
-| Inspect / native ReAct | In the attempted full batch, JCR JS and packageinit passed all five scorers in both arms (four slots), including independent verification and audited skill behavior. | Only seven of ten sample records are retained: two standalone connection errors, a healthcheck skills-arm HTTP 429, and no records for the other three slots. The log is unfinished, not a successful full batch. |
+| Promptfoo / Pi | Recovered and continued evidence covers eight distinct slots with all five native assertions passing. New discovery-impl runs independently pass 45 tests and Java 11 targets in both arms. The approved packageinit no-skills replacement passes with no observed skill exposure under the new native boundary. | Two execution errors remain: JCR no-skills output truncation and healthcheck no-skills HTTP 429. Discovery-impl without skills used `-DskipTests` in a copied comparison project: the final independent build passed without skips, but protocol compliance is not perfect despite the unchanged native pass. Original contaminated packageinit/cancelled healthcheck controls remain preserved and invalid as clean controls. |
+| Tessl / hosted Claude agent | All ten slots have native scoring, activation audits and independent verification. Seven received full native marks; all activation audits pass; executable outcomes are nine PASS and one preserved FAIL. | Combined policy passes six of ten slots, not the whole batch. Three native quality deductions remain; discovery-impl without skills retains its unresolved timing-test failure and was not rerun. No missing outcomes or access blocker remain. |
+| Inspect / native ReAct | JCR JS, packageinit and standalone passed all five scorers in both arms across retained runs: six distinct slots, including independent verification and audited skill behavior. | Final distinct-slot inventory: six PASS, one incomplete healthcheck skills arm, two transport errors (healthcheck no-skills HTTP 429 and discovery-impl with-skills APIConnectionError), and one unsubmitted discovery-impl no-skills arm. Incomplete/errored checks were gated or unscored, not independently established build/quality failures. The connection error stopped further submissions; no retry or automatic resume is queued. |
 
 No repeated benchmark or statistically established skill effect is available.
 Native judge scores, executable checks and activation evidence remain distinct;
@@ -21,6 +21,34 @@ models, agent tools, runtimes and context management are not identical across
 providers. Details: [Promptfoo](providers/promptfoo/README.md#import-and-smoke-test-provenance),
 [Tessl validation](providers/tessl/VALIDATION.md),
 [Inspect validation](providers/inspect/README.md#live-validation-2026-11-06).
+
+Tessl collection now checkpoints metadata and executable coverage separately,
+resumes only explicitly, and validates frozen inputs, source snapshots and
+supporting-file hashes before reusing completed results (including failures).
+Inspect now emits redacted, identity-aware slot coverage, durable native progress
+and stops on native errors without automatic retries. Promptfoo's four approved
+continuation attempts are finished; the last hit HTTP 429, and no retry followed.
+Inspect's discovery-impl with-skills first model solve then ended on a connection
+error; its no-skills arm was not submitted. All live execution is now stopped,
+with no queued automatic work. An HTTP 200 model listing alone does not establish
+available token quota. Known completed outcomes are not silently retried. Tessl's
+outcomes and historical scores are not resubmitted or rescored. Recovered and
+continued Promptfoo results use different recorded harness-control versions and
+are not one identical-harness causal benchmark.
+
+Promptfoo's `native-file-boundary-v1` limits native file reads/searches to the
+disposable project and explicitly copied skills, and native writes to project
+files outside Git metadata. Uninstalled skill reads also fail the activation
+audit. These are native tool controls, **not an OS sandbox**: Bash remains
+unrestricted, so new controls are not presumed clean without inspecting evidence.
+
+Promptfoo's future judge inputs also include `bounded-command-evidence-v1`:
+up to eight deduplicated command/result records within a 16,000-character text
+budget, prioritizing check-option mentions, Git mutations, comparison copies and
+Maven commands. The saved discovery no-skills judge prompt omitted its comparison
+skip commands; the evidence-routing fix does not rewrite or rescore that result.
+Command mentions remain untrusted evidence for interpretation, not automatic
+regex-based verdicts.
 
 ## Layout and dependency boundary
 

@@ -24,6 +24,7 @@ test('generation has shared model settings, scenario-specific prompts and native
   assert.equal(withSkills.maxRetries, 0);
   assert.equal(withSkills.chatTemplateKwargs.enable_thinking, true);
   assert.equal(config.evaluateOptions.maxConcurrency, 1);
+  assert.equal(config.defaultTest.options.provider.config.maxRetries, 0);
   assert.deepEqual(config.prompts, ['{{task}}']);
   const scenario = config.tests.find((item) => item.description === 'jcr-js-nodetypes-parent-34-to-46');
   assert.ok(scenario);

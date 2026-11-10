@@ -15,6 +15,7 @@ from inspect_ai.scorer import Score, mean, scorer
 from inspect_ai.solver import solver
 
 from runtime import Runtime, bridge, grading_evidence, install_skills, write_json
+from report import error_summary
 
 
 def model_for(models, role):
@@ -81,9 +82,12 @@ def coding_agent(config):
             state.output.completion = runtime.completion["summary"]
             return state
         except BaseException as error:
-            write_json(Path(run_dir) / "error.json", {"type": type(error).__name__, "error": str(error)})
+            write_json(Path(run_dir) / "error.json", error_summary(error))
             if runtime:
+                if runtime.completion["status"] == "incomplete":
+                    runtime.stop(f"Agent interrupted: {type(error).__name__}")
                 runtime.persist()
+                state.metadata["evaluation"] = runtime.metadata
             raise
     return solve
 
